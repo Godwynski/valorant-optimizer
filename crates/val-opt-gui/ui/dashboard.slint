@@ -1,0 +1,243 @@
+import { Button } from "std-widgets.slint";
+
+export component DashboardView inherits Rectangle {
+    in property <string> cpu_name: "Intel Core i7-14700K / 20 Cores";
+    in property <string> gpu_name: "NVIDIA GeForce RTX 4080 (MSI Mode)";
+    in property <string> adapter_name: "Realtek PCIe GbE Controller (1 Gbps)";
+    in property <string> dpc_status: "OPTIMAL (< 80µs)";
+    in property <string> bufferbloat_grade: "A+";
+    in property <string> ping_value: "12 ms";
+    in property <bool> is_optimized: true;
+
+    callback launch_clicked();
+    callback optimize_toggle_clicked();
+
+    background: #0f1923;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 20px;
+
+        // Header Hero Banner
+        Rectangle {
+            height: 110px;
+            background: #172430;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #273b4d;
+
+            HorizontalLayout {
+                padding: 20px;
+                alignment: space-between;
+
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "VALORANT COMPETITIVE PROFILE";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: #ff4655;
+                        letter-spacing: 2px;
+                    }
+                    Text {
+                        text: "Extreme Frame Pacing & Low-Latency Engine";
+                        font-size: 20px;
+                        font-weight: 700;
+                        color: #ece8e1;
+                    }
+                    Text {
+                        text: "Kernel ETW LatencyMon Active • QoS DSCP 46 • Vanguard Compliant";
+                        font-size: 12px;
+                        color: #768079;
+                    }
+                }
+
+                // Status Badge
+                Rectangle {
+                    width: 130px;
+                    height: 38px;
+                    background: #103328;
+                    border-radius: 19px;
+                    border-width: 1px;
+                    border-color: #00f59b;
+
+                    Text {
+                        text: "● OPTIMIZED";
+                        font-size: 12px;
+                        font-weight: 700;
+                        color: #00f59b;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // 3-Card Metrics Grid
+        HorizontalLayout {
+            spacing: 16px;
+            height: 120px;
+
+            // Metric 1: Bufferbloat
+            Rectangle {
+                background: #172430;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #273b4d;
+
+                VerticalLayout {
+                    padding: 16px;
+                    alignment: space-between;
+                    Text {
+                        text: "NETWORK BUFFERBLOAT";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: #768079;
+                        letter-spacing: 1px;
+                    }
+                    Text {
+                        text: root.bufferbloat_grade;
+                        font-size: 36px;
+                        font-weight: 900;
+                        color: #00f59b;
+                    }
+                    Text {
+                        text: "Zero queue buffer delay detected";
+                        font-size: 11px;
+                        color: #768079;
+                    }
+                }
+            }
+
+            // Metric 2: DPC Latency
+            Rectangle {
+                background: #172430;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #273b4d;
+
+                VerticalLayout {
+                    padding: 16px;
+                    alignment: space-between;
+                    Text {
+                        text: "KERNEL INTERRUPT HEALTH";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: #768079;
+                        letter-spacing: 1px;
+                    }
+                    Text {
+                        text: root.dpc_status;
+                        font-size: 22px;
+                        font-weight: 800;
+                        color: #00f59b;
+                    }
+                    Text {
+                        text: "No drivers exceeding 500µs";
+                        font-size: 11px;
+                        color: #768079;
+                    }
+                }
+            }
+
+            // Metric 3: Target Frame Pacing
+            Rectangle {
+                background: #172430;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #273b4d;
+
+                VerticalLayout {
+                    padding: 16px;
+                    alignment: space-between;
+                    Text {
+                        text: "1% LOW FRAME TIME";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: #768079;
+                        letter-spacing: 1px;
+                    }
+                    Text {
+                        text: "< 3.8 ms";
+                        font-size: 32px;
+                        font-weight: 900;
+                        color: #ece8e1;
+                    }
+                    Text {
+                        text: "260+ FPS stability guarantee";
+                        font-size: 11px;
+                        color: #768079;
+                    }
+                }
+            }
+        }
+
+        // Hardware Subsystem Summary
+        Rectangle {
+            background: #172430;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #273b4d;
+
+            VerticalLayout {
+                padding: 18px;
+                spacing: 12px;
+
+                Text {
+                    text: "ACTIVE HARDWARE TELEMETRY";
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: #ff4655;
+                    letter-spacing: 1.5px;
+                }
+
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text { text: "Processor:"; color: #768079; font-size: 13px; }
+                    Text { text: root.cpu_name; color: #ece8e1; font-weight: 600; font-size: 13px; }
+                }
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text { text: "Graphics:"; color: #768079; font-size: 13px; }
+                    Text { text: root.gpu_name; color: #ece8e1; font-weight: 600; font-size: 13px; }
+                }
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text { text: "Network Interface:"; color: #768079; font-size: 13px; }
+                    Text { text: root.adapter_name; color: #ece8e1; font-weight: 600; font-size: 13px; }
+                }
+            }
+        }
+
+        // Ephemeral Launch Button (Massive Red CTA)
+        Rectangle {
+            height: 68px;
+            background: touch.pressed ? #cc2f3c : touch.has-hover ? #ff5e6c : #ff4655;
+            border-radius: 6px;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #ff465540;
+
+            touch := TouchArea {
+                clicked => { root.launch_clicked(); }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Text {
+                    text: "⚡ LAUNCH OPTIMIZED (EPHEMERAL UI UNLOAD)";
+                    font-size: 16px;
+                    font-weight: 800;
+                    color: #ffffff;
+                    horizontal-alignment: center;
+                    letter-spacing: 2px;
+                }
+                Text {
+                    text: "Unloads GUI from memory (0 MB RAM) • Applies Real-Time DPC/ISR & QoS Priorities";
+                    font-size: 11px;
+                    color: #ffffffc0;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+    }
+}

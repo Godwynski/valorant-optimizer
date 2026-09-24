@@ -1,0 +1,67 @@
+# Phase 2: Benchmarking & Telemetry Infrastructure
+
+---
+
+## 1. Phase Objective
+Build an empirical measurement infrastructure to objectively test optimizations against stock Windows baselines. This includes high-precision frame-time ingestion (ETW / PresentMon API), statistical distribution analysis (1% / 0.1% lows, variance), automated multi-trial A/B testing with Student's t-test verification, and UDP jitter tracking.
+
+---
+
+## 2. Phase Metadata
+- **Phase ID:** `PHASE-02`
+- **Status:** `COMPLETE`
+- **Dependencies:** Phase 1 complete.
+- **Target Deliverable:** Headless benchmark runner capable of recording 10 repeated trials, computing statistical significance ($p$-values), and rejecting placebo tweaks.
+- **QA File:** `QA/QA_PHASE_02.md`
+
+---
+
+## 3. Tasks Breakdown
+
+### `TASK-P02-001`: PresentMon / ETW Frame-Time Ingestion Engine
+- **Objective:** Build a headless frame-time telemetry collector utilizing the Intel PresentMon API or Windows ETW D3D events.
+- **Files Involved:**
+  - `crates/val-opt-core/src/benchmarking/etw_capture.rs`
+  - `crates/val-opt-core/src/benchmarking/frametimes.rs`
+  - `crates/val-opt-core/src/benchmarking/synthetic.rs`
+- **Requirements:** Capture individual frame presentation times (`MsBetweenPresents`, `MsUntilDisplayed`) without injecting hooks into the game process.
+- **Verification Method:** Run synthetic DirectX sample app and verify frame capture stream with microsecond precision.
+- **Completion Criteria:** Operates with < 0.2% CPU overhead and zero DLL injection into game memory.
+- **Status:** `COMPLETE`
+
+### `TASK-P02-002`: Statistical Metrics & Percentile Calculation Engine
+- **Objective:** Implement statistical computation module for Average FPS, 1% Low (99th percentile), 0.1% Low (99.9th percentile), and frame-time standard deviation.
+- **Files Involved:**
+  - `crates/val-opt-shared/src/benchmarking/stats.rs`
+  - `crates/val-opt-shared/src/benchmarking/models.rs`
+- **Requirements:** Compute rolling and total statistical distributions over recorded frame timestamps, with configurable warm-up frame trimming.
+- **Verification Method:** Unit test on synthetic timestamp arrays with known statistical percentiles.
+- **Completion Criteria:** Accurately computes average FPS, 1% low, 0.1% low, and variance matching CapFrameX validation datasets.
+- **Status:** `COMPLETE`
+
+### `TASK-P02-003`: Automated Multi-Trial A/B Testing Harness
+- **Objective:** Create an automated harness that executes N repeated benchmark runs (Baseline vs Optimized) and computes two-tailed Student's t-test ($p$-values).
+- **Files Involved:**
+  - `crates/val-opt-core/src/benchmarking/ab_runner.rs`
+- **Requirements:** Execute configurable test cycles (e.g. 10 Baseline vs 10 Optimized), filter outliers, and test whether differences satisfy $p < 0.01$ and $\Delta > 3\%$.
+- **Verification Method:** Run mock benchmark trials and verify $p$-value calculation against statistical reference tables.
+- **Completion Criteria:** Automatically generates comparative markdown/JSON report indicating whether an optimization produces statistically significant gains.
+- **Status:** `COMPLETE`
+
+### `TASK-P02-004`: UDP Jitter & Ping Telemetry Collector
+- **Objective:** Implement network latency telemetry tool that measures round-trip time, packet jitter, and packet loss against Riot edge nodes.
+- **Files Involved:**
+  - `crates/val-opt-core/src/network/probe.rs`
+  - `crates/val-opt-core/src/network/mod.rs`
+- **Requirements:** High-precision UDP probe transmitter sending time-stamped datagrams and recording return jitter.
+- **Verification Method:** Probe local gateway and public edge endpoints; verify jitter and RTT metrics against Wireshark traces.
+- **Completion Criteria:** Telemetry module records min/avg/max ping, standard deviation jitter, and packet loss percentage.
+- **Status:** `COMPLETE`
+
+---
+
+## 4. Phase Completion Gate
+1. All 4 tasks marked `COMPLETE`.
+2. Unit tests and integration tests pass with 100% success rate.
+3. Checklist in `QA/QA_PHASE_02.md` verified with actual logged output.
+4. STOP and await user instruction to proceed to Phase 3.

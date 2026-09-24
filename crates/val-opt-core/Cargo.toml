@@ -1,0 +1,19 @@
+[package]
+name = "val-opt-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+val-opt-shared = { path = "../val-opt-shared" }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true

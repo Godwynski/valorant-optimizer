@@ -1,0 +1,145 @@
+export component SettingsView inherits Rectangle {
+    in-out property <bool> game_mode_enabled: true;
+    in-out property <bool> power_scheme_enabled: true;
+    in-out property <bool> audio_apo_disabled: true;
+    in-out property <bool> eee_disabled: true;
+    in-out property <bool> flow_control_disabled: true;
+    in-out property <bool> qos_dscp_enabled: true;
+    in-out property <bool> bloatware_purge_enabled: true;
+    in-out property <bool> services_pause_enabled: true;
+
+    callback apply_all_clicked();
+    callback rollback_all_clicked();
+
+    background: #0f1923;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
+
+        Text {
+            text: "OPTIMIZATION SUBSYSTEM TUNING";
+            font-size: 11px;
+            font-weight: 700;
+            color: #ff4655;
+            letter-spacing: 2px;
+        }
+
+        Text {
+            text: "Toggle specific kernel, audio, and network optimizations below.";
+            font-size: 13px;
+            color: #768079;
+        }
+
+        // Settings Card
+        Rectangle {
+            background: #172430;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #273b4d;
+
+            VerticalLayout {
+                padding: 20px;
+                spacing: 16px;
+
+                // Toggle 1: Game Mode
+                HorizontalLayout {
+                    alignment: space-between;
+                    VerticalLayout {
+                        Text { text: "Windows Game Mode Scheduling"; font-size: 14px; font-weight: 600; color: #ece8e1; }
+                        Text { text: "Enforces AutoGameMode / Shell GPU prioritization"; font-size: 11px; color: #768079; }
+                    }
+                    Text { text: root.game_mode_enabled ? "ACTIVE" : "OFF"; color: root.game_mode_enabled ? #00f59b : #768079; font-weight: 700; font-size: 13px; vertical-alignment: center; }
+                }
+
+                Rectangle { height: 1px; background: #273b4d; }
+
+                // Toggle 2: Power Scheme
+                HorizontalLayout {
+                    alignment: space-between;
+                    VerticalLayout {
+                        Text { text: "Gaming Power Plan (Desktop Ultimate / High Performance)"; font-size: 14px; font-weight: 600; color: #ece8e1; }
+                        Text { text: "Locks maximum CPU core frequency and disables core unparking delays"; font-size: 11px; color: #768079; }
+                    }
+                    Text { text: root.power_scheme_enabled ? "ACTIVE" : "OFF"; color: root.power_scheme_enabled ? #00f59b : #768079; font-weight: 700; font-size: 13px; vertical-alignment: center; }
+                }
+
+                Rectangle { height: 1px; background: #273b4d; }
+
+                // Toggle 3: Audio APO Bypass
+                HorizontalLayout {
+                    alignment: space-between;
+                    VerticalLayout {
+                        Text { text: "Audio DSP & APO Enhancement Bypass"; font-size: 14px; font-weight: 600; color: #ece8e1; }
+                        Text { text: "Eliminates audio driver DPC spikes and input delay across endpoints"; font-size: 11px; color: #768079; }
+                    }
+                    Text { text: root.audio_apo_disabled ? "ACTIVE" : "OFF"; color: root.audio_apo_disabled ? #00f59b : #768079; font-weight: 700; font-size: 13px; vertical-alignment: center; }
+                }
+
+                Rectangle { height: 1px; background: #273b4d; }
+
+                // Toggle 4: Network EEE & Flow Control
+                HorizontalLayout {
+                    alignment: space-between;
+                    VerticalLayout {
+                        Text { text: "Network Adapter EEE & Flow Control Disable"; font-size: 14px; font-weight: 600; color: #ece8e1; }
+                        Text { text: "Disables Energy Efficient Ethernet and PAUSE frames (0 packet queuing delay)"; font-size: 11px; color: #768079; }
+                    }
+                    Text { text: root.eee_disabled ? "ACTIVE" : "OFF"; color: root.eee_disabled ? #00f59b : #768079; font-weight: 700; font-size: 13px; vertical-alignment: center; }
+                }
+
+                Rectangle { height: 1px; background: #273b4d; }
+
+                // Toggle 5: QoS DSCP 46
+                HorizontalLayout {
+                    alignment: space-between;
+                    VerticalLayout {
+                        Text { text: "Quality of Service (QoS) DSCP 46 Policy"; font-size: 14px; font-weight: 600; color: #ece8e1; }
+                        Text { text: "Expedited Forwarding priority for VALORANT UDP client outbound traffic"; font-size: 11px; color: #768079; }
+                    }
+                    Text { text: root.qos_dscp_enabled ? "ACTIVE" : "OFF"; color: root.qos_dscp_enabled ? #00f59b : #768079; font-weight: 700; font-size: 13px; vertical-alignment: center; }
+                }
+            }
+        }
+
+        // Action Buttons Row
+        HorizontalLayout {
+            spacing: 16px;
+            height: 48px;
+
+            Rectangle {
+                background: apply_touch.pressed ? #00c77e : apply_touch.has-hover ? #00ffaa : #00f59b;
+                border-radius: 6px;
+                apply_touch := TouchArea {
+                    clicked => { root.apply_all_clicked(); }
+                }
+                Text {
+                    text: "COMMIT ACTIVE PROFILE";
+                    color: #0f1923;
+                    font-size: 13px;
+                    font-weight: 800;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle {
+                background: rollback_touch.pressed ? #202b36 : rollback_touch.has-hover ? #2e3e4e : #1f2e3d;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: #3e5265;
+                rollback_touch := TouchArea {
+                    clicked => { root.rollback_all_clicked(); }
+                }
+                Text {
+                    text: "ROLL BACK TO WINDOWS DEFAULTS";
+                    color: #ece8e1;
+                    font-size: 13px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

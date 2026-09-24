@@ -1,0 +1,30 @@
+[package]
+name = "val-opt-tests"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[[test]]
+name = "hardware_matrix_tests"
+path = "hardware_matrix_tests.rs"
+
+[[test]]
+name = "edge_case_tests"
+path = "edge_case_tests.rs"
+
+[[test]]
+name = "vanguard_audit"
+path = "vanguard_audit.rs"
+
+[dependencies]
+val-opt-shared = { path = "../crates/val-opt-shared" }
+val-opt-core = { path = "../crates/val-opt-core" }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true

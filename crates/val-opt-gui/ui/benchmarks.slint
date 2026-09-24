@@ -1,0 +1,139 @@
+export component BenchmarksView inherits Rectangle {
+    in property <string> unloaded_ping: "11.4 ms";
+    in property <string> loaded_ping: "11.5 ms";
+    in property <string> bufferbloat_delta: "+0.1 ms";
+    in property <string> bufferbloat_grade: "A+";
+    in property <string> highest_dpc_driver: "ndis.sys (79µs)";
+    in property <string> highest_isr_driver: "Wdf01000.sys (38µs)";
+    in property <string> test_status_msg: "Diagnostics Ready. Zero latency bottlenecks detected.";
+
+    callback run_bufferbloat_clicked();
+    callback run_latency_profile_clicked();
+
+    background: #0f1923;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
+
+        Text {
+            text: "DIAGNOSTICS & SYSTEM BENCHMARKING";
+            font-size: 11px;
+            font-weight: 700;
+            color: #ff4655;
+            letter-spacing: 2px;
+        }
+
+        // Action Trigger Bar
+        HorizontalLayout {
+            spacing: 16px;
+            height: 44px;
+
+            Rectangle {
+                background: bb_touch.pressed ? #cc2f3c : bb_touch.has-hover ? #ff5e6c : #ff4655;
+                border-radius: 6px;
+                bb_touch := TouchArea {
+                    clicked => { root.run_bufferbloat_clicked(); }
+                }
+                Text {
+                    text: "RUN BUFFERBLOAT TEST";
+                    font-size: 12px;
+                    font-weight: 800;
+                    color: #ffffff;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle {
+                background: lat_touch.pressed ? #202b36 : lat_touch.has-hover ? #2e3e4e : #1f2e3d;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: #3e5265;
+                lat_touch := TouchArea {
+                    clicked => { root.run_latency_profile_clicked(); }
+                }
+                Text {
+                    text: "PROFILE KERNEL DPC LATENCY";
+                    font-size: 12px;
+                    font-weight: 700;
+                    color: #ece8e1;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Test Output Container
+        Rectangle {
+            background: #172430;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #273b4d;
+
+            VerticalLayout {
+                padding: 20px;
+                spacing: 16px;
+
+                Text {
+                    text: "BUFFERBLOAT & NETWORK DELTA ANALYSIS";
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: #00f59b;
+                    letter-spacing: 1.5px;
+                }
+
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text { text: "Unloaded Baseline Ping:"; color: #768079; font-size: 13px; }
+                    Text { text: root.unloaded_ping; color: #ece8e1; font-weight: 600; font-size: 13px; }
+                }
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text { text: "Loaded Ping (Concurrent Traffic):"; color: #768079; font-size: 13px; }
+                    Text { text: root.loaded_ping; color: #ece8e1; font-weight: 600; font-size: 13px; }
+                }
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text { text: "Bufferbloat Queue Delay Spike:"; color: #768079; font-size: 13px; }
+                    Text { text: root.bufferbloat_delta; color: #00f59b; font-weight: 700; font-size: 13px; }
+                }
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text { text: "Bufferbloat Grade:"; color: #768079; font-size: 13px; }
+                    Text { text: root.bufferbloat_grade; color: #00f59b; font-weight: 900; font-size: 18px; }
+                }
+
+                Rectangle { height: 1px; background: #273b4d; }
+
+                Text {
+                    text: "KERNEL ETW INTERRUPT & DRIVER HEALTH";
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: #00f59b;
+                    letter-spacing: 1.5px;
+                }
+
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text { text: "Highest DPC Routine Driver:"; color: #768079; font-size: 13px; }
+                    Text { text: root.highest_dpc_driver; color: #ece8e1; font-weight: 600; font-size: 13px; }
+                }
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text { text: "Highest ISR Routine Driver:"; color: #768079; font-size: 13px; }
+                    Text { text: root.highest_isr_driver; color: #ece8e1; font-weight: 600; font-size: 13px; }
+                }
+
+                Rectangle { height: 1px; background: #273b4d; }
+
+                Text {
+                    text: root.test_status_msg;
+                    font-size: 12px;
+                    color: #ece8e1;
+                    font-weight: 600;
+                }
+            }
+        }
+    }
+}

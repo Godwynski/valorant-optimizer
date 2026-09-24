@@ -1,0 +1,234 @@
+import { DashboardView } from "dashboard.slint";
+import { SettingsView } from "settings.slint";
+import { BenchmarksView } from "benchmarks.slint";
+
+export component AppWindow inherits Window {
+    title: "VALORANT Performance Optimizer";
+    min-width: 960px;
+    min-height: 680px;
+    preferred-width: 960px;
+    preferred-height: 680px;
+    background: #0f1923;
+
+    in-out property <int> active_tab: 0;
+
+    // Hardware & Telemetry Properties
+    in-out property <string> cpu_name: "Intel Core i7-14700K / 20 Cores";
+    in-out property <string> gpu_name: "NVIDIA GeForce RTX 4080 (MSI Mode)";
+    in-out property <string> adapter_name: "Realtek PCIe GbE Controller (1 Gbps)";
+    in-out property <string> dpc_status: "OPTIMAL (< 80µs)";
+    in-out property <string> bufferbloat_grade: "A+";
+    in-out property <string> ping_value: "12 ms";
+
+    // Diagnostic & Benchmark Properties
+    in-out property <string> unloaded_ping: "11.4 ms";
+    in-out property <string> loaded_ping: "11.5 ms";
+    in-out property <string> bufferbloat_delta: "+0.1 ms";
+    in-out property <string> highest_dpc_driver: "ndis.sys (79µs)";
+    in-out property <string> highest_isr_driver: "Wdf01000.sys (38µs)";
+    in-out property <string> test_status_msg: "Diagnostics Ready. Zero latency bottlenecks detected.";
+
+    // Action Callbacks
+    callback launch_clicked();
+    callback apply_all_clicked();
+    callback rollback_all_clicked();
+    callback run_bufferbloat_clicked();
+    callback run_latency_profile_clicked();
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+
+        // Top Navigation Bar
+        Rectangle {
+            height: 64px;
+            background: #172430;
+
+            VerticalLayout {
+                spacing: 0px;
+                padding: 0px;
+
+                HorizontalLayout {
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    alignment: space-between;
+
+                    // Brand / Logo Header
+                    HorizontalLayout {
+                        spacing: 12px;
+                        alignment: start;
+
+                        // Logo Accent Mark
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 6px;
+                                height: 28px;
+                                background: #ff4655;
+                                border-radius: 3px;
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "VAL-OPT";
+                                    font-size: 16px;
+                                    font-weight: 900;
+                                    color: #ff4655;
+                                    letter-spacing: 2px;
+                                }
+                                Text {
+                                    text: "COMPETITIVE ENGINE";
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    color: #ece8e1;
+                                    letter-spacing: 1.5px;
+                                }
+                            }
+                            Text {
+                                text: "Zero-Overhead Kernel & Network Pacing Subsystem";
+                                font-size: 10px;
+                                color: #768079;
+                            }
+                        }
+                    }
+
+                    // Navigation Tabs
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: end;
+
+                        // Tab 0: Dashboard
+                        Rectangle {
+                            width: 130px;
+                            height: 48px;
+                            background: tab0_touch.has-hover ? #1f2e3d : transparent;
+                            border-radius: 4px;
+
+                            tab0_touch := TouchArea {
+                                clicked => { root.active_tab = 0; }
+                            }
+
+                            VerticalLayout {
+                                alignment: space-between;
+                                padding-top: 14px;
+                                Text {
+                                    text: "DASHBOARD";
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    color: root.active_tab == 0 ? #ff4655 : #768079;
+                                    horizontal-alignment: center;
+                                    letter-spacing: 1px;
+                                }
+                                Rectangle {
+                                    height: 3px;
+                                    background: root.active_tab == 0 ? #ff4655 : transparent;
+                                }
+                            }
+                        }
+
+                        // Tab 1: Settings
+                        Rectangle {
+                            width: 150px;
+                            height: 48px;
+                            background: tab1_touch.has-hover ? #1f2e3d : transparent;
+                            border-radius: 4px;
+
+                            tab1_touch := TouchArea {
+                                clicked => { root.active_tab = 1; }
+                            }
+
+                            VerticalLayout {
+                                alignment: space-between;
+                                padding-top: 14px;
+                                Text {
+                                    text: "SETTINGS & TUNING";
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    color: root.active_tab == 1 ? #ff4655 : #768079;
+                                    horizontal-alignment: center;
+                                    letter-spacing: 1px;
+                                }
+                                Rectangle {
+                                    height: 3px;
+                                    background: root.active_tab == 1 ? #ff4655 : transparent;
+                                }
+                            }
+                        }
+
+                        // Tab 2: Benchmarks
+                        Rectangle {
+                            width: 150px;
+                            height: 48px;
+                            background: tab2_touch.has-hover ? #1f2e3d : transparent;
+                            border-radius: 4px;
+
+                            tab2_touch := TouchArea {
+                                clicked => { root.active_tab = 2; }
+                            }
+
+                            VerticalLayout {
+                                alignment: space-between;
+                                padding-top: 14px;
+                                Text {
+                                    text: "BENCHMARKS & ETW";
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    color: root.active_tab == 2 ? #ff4655 : #768079;
+                                    horizontal-alignment: center;
+                                    letter-spacing: 1px;
+                                }
+                                Rectangle {
+                                    height: 3px;
+                                    background: root.active_tab == 2 ? #ff4655 : transparent;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Divider line below header
+                Rectangle {
+                    height: 1px;
+                    background: #273b4d;
+                }
+            }
+        }
+
+        // Active View Container
+        Rectangle {
+            background: #0f1923;
+
+            if root.active_tab == 0: DashboardView {
+                cpu_name: root.cpu_name;
+                gpu_name: root.gpu_name;
+                adapter_name: root.adapter_name;
+                dpc_status: root.dpc_status;
+                bufferbloat_grade: root.bufferbloat_grade;
+                ping_value: root.ping_value;
+                launch_clicked => { root.launch_clicked(); }
+            }
+
+            if root.active_tab == 1: SettingsView {
+                apply_all_clicked => { root.apply_all_clicked(); }
+                rollback_all_clicked => { root.rollback_all_clicked(); }
+            }
+
+            if root.active_tab == 2: BenchmarksView {
+                unloaded_ping: root.unloaded_ping;
+                loaded_ping: root.loaded_ping;
+                bufferbloat_delta: root.bufferbloat_delta;
+                bufferbloat_grade: root.bufferbloat_grade;
+                highest_dpc_driver: root.highest_dpc_driver;
+                highest_isr_driver: root.highest_isr_driver;
+                test_status_msg: root.test_status_msg;
+                run_bufferbloat_clicked => { root.run_bufferbloat_clicked(); }
+                run_latency_profile_clicked => { root.run_latency_profile_clicked(); }
+            }
+        }
+    }
+}

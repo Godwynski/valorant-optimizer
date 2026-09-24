@@ -1,0 +1,26 @@
+# Rust / Cargo build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock.orig
+
+# Compiler and Debug files
+*.pdb
+*.ilk
+
+# Installer & Release artifacts
+installer/output/
+installer/*.tmp
+
+# System & OS generated files
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.log
+
+# Crash dumps
+*.dmp
+
+# Temporary editor files
+.idea/
+.vscode/
+*.sublime-workspace
