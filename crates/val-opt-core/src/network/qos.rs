@@ -99,14 +99,12 @@ fn restore_nla_setting(previous_setting: Option<&str>) -> Result<(), String> {
             let _ = cmd.output();
         }
         None => {
-            const REMOVE_NLA: &str = "Remove-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\QoS' -Name 'Do not use NLA' -Force -ErrorAction SilentlyContinue";
-            let _ = Command::new("powershell")
-                .args(["-NoProfile", "-NonInteractive", "-Command", REMOVE_NLA])
-                .output();
+            // When no prior NLA setting was recorded or modified by the optimizer,
+            // preserve registry untouched (do not execute Remove-ItemProperty).
+            tracing::debug!("No prior NLA setting to restore; registry unmodified");
         }
     }
 
-    info!("Restored Windows TCP/IP QoS NLA registry setting");
     Ok(())
 }
 

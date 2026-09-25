@@ -2,9 +2,9 @@ export component SettingsView inherits Rectangle {
     in-out property <bool> game_mode_enabled: true;
     in-out property <bool> power_scheme_enabled: true;
     in-out property <bool> audio_apo_disabled: true;
-    in-out property <bool> eee_disabled: true;
-    in-out property <bool> flow_control_disabled: true;
-    in-out property <bool> qos_dscp_enabled: true;
+    in-out property <bool> eee_disabled: false;
+    in-out property <bool> flow_control_disabled: false;
+    in-out property <bool> qos_dscp_enabled: false;
     in-out property <bool> bloatware_purge_enabled: true;
     in-out property <bool> services_pause_enabled: true;
     in-out property <bool> unload_gui_on_launch: true;
@@ -79,26 +79,26 @@ export component SettingsView inherits Rectangle {
 
                 Rectangle { height: 1px; background: #273b4d; }
 
-                // Toggle 4: Network EEE & Flow Control
+                // Toggle 4: Network Adapter Telemetry
                 HorizontalLayout {
                     alignment: space-between;
                     VerticalLayout {
-                        Text { text: "Network Adapter EEE & Flow Control Disable"; font-size: 14px; font-weight: 600; color: #ece8e1; }
-                        Text { text: "Disables Energy Efficient Ethernet and PAUSE frames (0 packet queuing delay)"; font-size: 11px; color: #768079; }
+                        Text { text: "Network Adapter Diagnostics & RSS Telemetry"; font-size: 14px; font-weight: 600; color: #ece8e1; }
+                        Text { text: "Inspects Receive Side Scaling queues and adapter link status (Read-Only)"; font-size: 11px; color: #768079; }
                     }
-                    Text { text: root.eee_disabled ? "ACTIVE" : "OFF"; color: root.eee_disabled ? #00f59b : #768079; font-weight: 700; font-size: 13px; vertical-alignment: center; }
+                    Text { text: "READ-ONLY"; color: #00f59b; font-weight: 700; font-size: 13px; vertical-alignment: center; }
                 }
 
                 Rectangle { height: 1px; background: #273b4d; }
 
-                // Toggle 5: QoS DSCP 46
+                // Toggle 5: QoS DSCP 46 (De-scoped)
                 HorizontalLayout {
                     alignment: space-between;
                     VerticalLayout {
-                        Text { text: "Quality of Service (QoS) DSCP 46 Policy"; font-size: 14px; font-weight: 600; color: #ece8e1; }
-                        Text { text: "Expedited Forwarding priority for VALORANT UDP client outbound traffic"; font-size: 11px; color: #768079; }
+                        Text { text: "Quality of Service (QoS) DSCP Packet Tagging"; font-size: 14px; font-weight: 600; color: #ece8e1; }
+                        Text { text: "Permanently de-scoped in P3 (residential ISPs strip or drop non-standard DSCP packets)"; font-size: 11px; color: #768079; }
                     }
-                    Text { text: root.qos_dscp_enabled ? "ACTIVE" : "OFF"; color: root.qos_dscp_enabled ? #00f59b : #768079; font-weight: 700; font-size: 13px; vertical-alignment: center; }
+                    Text { text: "DE-SCOPED"; color: #768079; font-weight: 700; font-size: 13px; vertical-alignment: center; }
                 }
 
                 Rectangle { height: 1px; background: #273b4d; }

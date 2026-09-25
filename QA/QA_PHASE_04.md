@@ -11,8 +11,8 @@
 
 ## 2. Pre-Verification Checklist
 - [x] Phase 3 is verified and signed off.
-- [x] Whitelist enforcement blocks attempts to kill Tier 0 processes (Vanguard, DWM, System).
-- [x] Services (`wuauserv`, `SysMain`) pause cleanly and resume upon session end.
+- [x] Whitelist enforcement blocks attempts to kill Tier 0 processes (Vanguard, DWM, System, Windows Update).
+- [x] Services (`SysMain`, `DiagTrack`, `Spooler`) pause cleanly and resume upon session end (`wuauserv` protected in Tier 0).
 - [x] Game supervisor applies priority `High` and terminates `RiotClientUx.exe`.
 
 ---

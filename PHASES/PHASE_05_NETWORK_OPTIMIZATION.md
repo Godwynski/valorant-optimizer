@@ -18,32 +18,34 @@ Build the host-side network optimization and diagnostics suite. This disables En
 
 ## 3. Tasks Breakdown
 
-### `TASK-P05-001`: NIC Property Configurator (EEE & Interrupt Moderation)
-- **Objective:** Programmatically configure physical network adapter to disable Energy Efficient Ethernet (EEE) and tune Interrupt Moderation.
+### `TASK-P05-001`: NIC Property Configurator & Diagnostics
+- **Objective:** Programmatically query physical network adapter properties and validate hardware configuration.
 - **Files Involved:**
   - `crates/val-opt-core/src/network/adapter.rs`
-- **Requirements:** Query active adapter via CIM/WMI/NetAdapter, set `*EEE` = 0 (Disabled), `*GreenEthernet` = 0 (Disabled), and `*InterruptModeration` = Low or Disabled; record original settings.
-- **Verification Method:** Check adapter advanced properties in Windows Device Manager before and after application.
-- **Completion Criteria:** Properties applied without network link drop lasting > 1.5 seconds; full rollback supported.
-- **Status:** `COMPLETE`
+- **Requirements:** Query active adapter via CIM/WMI/NetAdapter; inspect property values; support rollback for any legacy applied settings.
+- **Phase P3 De-Scoping Note:** Automatic Interrupt Moderation mutation was PERMANENTLY REMOVED in Phase P3 (`TASK-OPT-03`). Disabling interrupt moderation induces high packet interrupt rates and severe DPC latency spikes on Core 0 under throughput, destabilizing frame pacing. All automatic NIC driver mutations have been removed from the default optimization path; adapter settings remain at OEM driver defaults.
+- **Verification Method:** Check adapter advanced properties in Windows Device Manager before and after inspection.
+- **Completion Criteria:** Properties queried without network link drop lasting > 1.5 seconds; automatic driver mutations eliminated.
+- **Status:** `COMPLETE (REMEDIATED IN P3)`
 
 ### `TASK-P05-002`: Flow Control & RSS Verifier
-- **Objective:** Verify Receive Side Scaling (RSS) is active and disable 802.3x Flow Control on the primary network interface.
+- **Objective:** Verify Receive Side Scaling (RSS) is active and inspect Flow Control on the primary network interface.
 - **Files Involved:**
   - `crates/val-opt-core/src/network/flow_control.rs`
-- **Requirements:** Ensure Flow Control is disabled (to avoid UDP packet stalling) and RSS has $\ge 4$ queues allocated.
+- **Requirements:** Ensure Flow Control query functions reliably and RSS has $\ge 4$ queues allocated.
 - **Verification Method:** Verify settings via PowerShell `Get-NetAdapterAdvancedProperty` and netsh.
-- **Completion Criteria:** Successfully disables Flow Control and validates RSS queue distribution.
+- **Completion Criteria:** Successfully reads Flow Control and validates RSS queue distribution.
 - **Status:** `COMPLETE`
 
-### `TASK-P05-003`: Windows QoS DSCP Policy Registrar
-- **Objective:** Register a local QoS policy tagging VALORANT UDP outbound packets with DSCP 46 (Expedited Forwarding).
+### `TASK-P05-003`: Windows QoS DSCP Policy Diagnostic (Read-Only)
+- **Objective:** Inspect registered Windows QoS policies without mutating system network policies.
 - **Files Involved:**
   - `crates/val-opt-core/src/network/qos.rs`
-- **Requirements:** Create Group Policy / Windows QoS policy rule matching `VALORANT-Win64-Shipping.exe` port range 7000-8000 with DSCP 46; ensure rollback removes rule.
+- **Requirements:** Query active NetQosPolicy rules via PowerShell `Get-NetQosPolicy`.
+- **Phase P3 De-Scoping Note:** Automatic creation of DSCP 46 QoS policies was PERMANENTLY REMOVED in Phase P3 (`TASK-OPT-02`). Residential ISPs and consumer routers routinely strip or reset DSCP tags upon ingress, and commercial carrier traffic policers drop unauthorized Expedited Forwarding packets. The module is retained strictly as a passive, read-only diagnostic tool (`query_qos_policy`).
 - **Verification Method:** Verify policy entry using PowerShell `Get-NetQosPolicy` and check IP header DSCP field via Wireshark.
-- **Completion Criteria:** QoS policy successfully registered and unregisters cleanly on rollback.
-- **Status:** `COMPLETE`
+- **Completion Criteria:** Read-only inspection operates without registry modification or packet tagging.
+- **Status:** `COMPLETE (REMEDIATED IN P3)`
 
 ### `TASK-P05-004`: Bufferbloat & Network Health Diagnostic Runner
 - **Objective:** Implement standalone network quality test measuring loaded vs unloaded ping and jitter.

@@ -85,6 +85,7 @@ impl ProcessSafetyDb {
             "mpssvc", // Windows Defender Firewall
             "windefend",
             "securityhealthservice",
+            "wuauserv", // Windows Update (MUST_NOT_MODIFY per Phase P3 safety specification)
         ];
         for svc in tier0_services {
             service_tiers.insert(svc.to_lowercase(), ProcessTier::Tier0Protected);
@@ -150,7 +151,6 @@ impl ProcessSafetyDb {
         // TIER 3: NON-ESSENTIAL PAUSABLE SERVICES
         // -------------------------------------------------------------
         let tier3_services = [
-            "wuauserv",  // Windows Update
             "sysmain",   // Superfetch / Prefetch page defrag
             "diagtrack", // Telemetry / Diagnostics
             "spooler",   // Print Spooler
@@ -220,11 +220,15 @@ mod tests {
         assert!(db.assert_safe_to_kill("csrss.exe").is_err());
         assert!(db.assert_safe_to_kill("RiotClientServices.exe").is_err());
 
-        // Tier 0 Service Invariants
+        // Tier 0 Service Invariants (Vanguard, Core OS, Defender, Windows Update)
         assert_eq!(db.classify_service("vgc"), ProcessTier::Tier0Protected);
         assert_eq!(db.classify_service("CryptSvc"), ProcessTier::Tier0Protected);
+        assert_eq!(db.classify_service("WinDefend"), ProcessTier::Tier0Protected);
+        assert_eq!(db.classify_service("wuauserv"), ProcessTier::Tier0Protected);
         assert!(db.assert_safe_to_stop_service("vgc").is_err());
         assert!(db.assert_safe_to_stop_service("CryptSvc").is_err());
+        assert!(db.assert_safe_to_stop_service("WinDefend").is_err());
+        assert!(db.assert_safe_to_stop_service("wuauserv").is_err());
     }
 
     #[test]
@@ -240,11 +244,12 @@ mod tests {
         assert!(db.assert_safe_to_kill("brave.exe").is_ok());
         assert!(db.assert_safe_to_kill("RiotClientUx.exe").is_ok());
 
-        // Safe Tier 3 services
-        assert_eq!(db.classify_service("wuauserv"), ProcessTier::Tier3ServicePause);
+        // Optional Tier 3 services (user-controlled)
         assert_eq!(db.classify_service("SysMain"), ProcessTier::Tier3ServicePause);
         assert_eq!(db.classify_service("DiagTrack"), ProcessTier::Tier3ServicePause);
+        assert_eq!(db.classify_service("spooler"), ProcessTier::Tier3ServicePause);
 
-        assert!(db.assert_safe_to_stop_service("wuauserv").is_ok());
+        assert!(db.assert_safe_to_stop_service("SysMain").is_ok());
+        assert!(db.assert_safe_to_stop_service("spooler").is_ok());
     }
 }

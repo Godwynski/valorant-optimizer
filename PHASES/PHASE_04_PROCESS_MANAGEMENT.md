@@ -28,24 +28,27 @@ Build the process safety database and lifecycle supervisor. This engine graceful
 - **Completion Criteria:** Attempting to classify `vgc.exe`, `csrss.exe`, or `dwm.exe` as Tier 2 or 3 triggers a hard compile/runtime error.
 - **Status:** `COMPLETE`
 
-### `TASK-P04-002`: Graceful Process Termination & Working Set Trimmer
-- **Objective:** Implement safe termination engine with two-stage exit (`WM_CLOSE` -> 1000ms wait -> `TerminateProcess`) and RAM working set trimming for Explorer.
+### `TASK-P04-002`: Graceful Process Termination & Memory Diagnostics
+- **Objective:** Implement safe termination engine with two-stage exit (`WM_CLOSE` -> 1000ms wait -> `TerminateProcess`) and observational RAM telemetry.
 - **Files Involved:**
   - `crates/val-opt-core/src/process/terminator.rs`
   - `crates/val-opt-core/src/process/memory.rs`
-- **Requirements:** Terminate safe Tier 2 targets gracefully; record process paths for post-match relaunch; call `EmptyWorkingSet` on `explorer.exe`.
-- **Verification Method:** Launch test instances of notepad and browser; verify graceful exit and working set memory reduction.
+- **Requirements:** Terminate safe Tier 2 targets gracefully; record process paths for post-match relaunch; query diagnostic memory statistics via `K32GetProcessMemoryInfo`.
+- **Phase P3 De-Scoping Note:** Forced `EmptyWorkingSet` working-set trimming was PERMANENTLY REMOVED in Phase P3 (`TASK-OPT-01`). Forcing physical pages to the standby/paged pool causes soft page faults and micro-stuttering upon shell access. Replaced with passive, read-only diagnostic telemetry.
+- **Verification Method:** Launch test instances of notepad and browser; verify graceful exit and diagnostic telemetry sampling.
 - **Completion Criteria:** Clean termination of Tier 2 processes without process tree leaks or orphaned handles.
-- **Status:** `COMPLETE`
+- **Status:** `COMPLETE (REMEDIATED IN P3)`
 
 ### `TASK-P04-003`: Non-Essential Windows Service Pauser
-- **Objective:** Implement service management module to pause and resume Tier 3 background services (`wuauserv`, `SysMain`, `DiagTrack`).
+- **Objective:** Implement service management module to pause and resume Tier 3 background services (`SysMain`, `DiagTrack`, `Spooler`).
 - **Files Involved:**
   - `crates/val-opt-core/src/process/services.rs`
+  - `crates/val-opt-core/src/process/safety_db.rs`
 - **Requirements:** Use Windows Service Control Manager (`OpenSCManagerW`, `OpenServiceW`, `ControlService`) to send `SERVICE_CONTROL_STOP`; record previous service running state.
+- **Phase P3 Safety Note:** Windows Update (`wuauserv`) was PERMANENTLY MOVED to Tier 0 Protected (`MUST_NOT_MODIFY`) in Phase P3 (`TASK-OPT-04`). Windows security and component updating must never be disabled or paused automatically. Supported Tier 3 services for user-controlled pausing are `SysMain`, `DiagTrack`, and `Spooler`.
 - **Verification Method:** Verify services enter Stopped state during gaming and resume Running state upon restoration.
 - **Completion Criteria:** Services start and stop safely without registry corruption or service hangs.
-- **Status:** `COMPLETE`
+- **Status:** `COMPLETE (REMEDIATED IN P3)`
 
 ### `TASK-P04-004`: VALORANT Process Lifecycle Supervisor
 - **Objective:** Implement game lifecycle watcher monitoring for `VALORANT-Win64-Shipping.exe`.

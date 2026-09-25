@@ -1,9 +1,10 @@
-//! Physical Network Adapter Advanced Property Configurator.
+//! Physical Network Adapter Advanced Property Configurator & Diagnostics.
 //!
-//! Configures physical NIC driver parameters to disable latency-inducing power saving features:
+//! Configures physical NIC driver parameters or queries adapter diagnostics:
 //! - Disables Energy Efficient Ethernet (EEE / 802.3az)
 //! - Disables Green Ethernet / Power Saving Mode
-//! - Tunes / Disables Interrupt Moderation to eliminate packet queuing batch delay
+//! - NOTE: Automatic Interrupt Moderation mutation was REMOVED in Phase P3 (TASK-OPT-03)
+//!   to prevent packet interrupt storms and high DPC latency.
 //!
 //! Employs `-NoRestart` to prevent network link drops > 1.5 seconds.
 //! Fully supports deterministic transactional rollback.
@@ -197,7 +198,7 @@ pub fn query_adapter_link_status(adapter_name: &str) -> Result<String, String> {
 /// Optimize latency-critical properties on the target adapter:
 /// 1. Disables Energy Efficient Ethernet (EEE)
 /// 2. Disables Green Ethernet / Power Saving Mode
-/// 3. Sets Interrupt Moderation to 0 (Disabled)
+/// (Interrupt Moderation mutation was removed in Phase P3 to prevent DPC interrupt storms).
 ///
 /// Returns a list of backups for applied properties to guarantee full rollback capability.
 pub fn optimize_adapter_latency_properties(
@@ -245,23 +246,10 @@ pub fn optimize_adapter_latency_properties(
         }
     }
 
-    // 3. Interrupt Moderation
-    if let Some(prop) = props
-        .iter()
-        .find(|p| p.registry_keyword.eq_ignore_ascii_case(INTERRUPT_MODERATION_KEYWORD))
-    {
-        let current_val = prop.first_value().unwrap_or("0");
-        // "0" = Disabled
-        if current_val != "0" {
-            backups.push(AdapterPropertyBackup {
-                adapter_name: adapter_name.to_string(),
-                keyword: prop.registry_keyword.clone(),
-                display_name: prop.display_name.clone(),
-                original_value: current_val.to_string(),
-            });
-            set_adapter_property(adapter_name, &prop.registry_keyword, "0")?;
-        }
-    }
+    // NOTE: Interrupt Moderation mutation was PERMANENTLY REMOVED in Phase P3 (TASK-OPT-03).
+    // Disabling interrupt moderation causes packet interrupt storms and high DPC latency spikes
+    // on Core 0 during heavy network traffic, destabilizing frame pacing. Interrupt Moderation
+    // is left strictly at the driver/OEM default.
 
     let link_after = query_adapter_link_status(adapter_name).unwrap_or_default();
     info!(

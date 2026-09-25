@@ -1,7 +1,8 @@
 //! Non-Essential Windows Service Pauser and Restorer.
 //!
-//! Pauses Tier 3 non-essential services (`wuauserv`, `SysMain`, `DiagTrack`) during matches
+//! Pauses Tier 3 non-essential services (`SysMain`, `DiagTrack`, `Spooler`) during matches
 //! to eliminate background CPU spikes and disk contention, then restores them post-match.
+//! NOTE: Windows Update (`wuauserv`) is protected under Tier 0 (MUST_NOT_MODIFY).
 
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
@@ -15,11 +16,11 @@ use windows::Win32::System::Services::{
 
 use super::safety_db::{ProcessSafetyDb, SafetyViolationError};
 
-/// Target Tier 3 services to pause during gaming sessions.
+/// Target Tier 3 services to pause during gaming sessions (explicit user opt-in only).
 pub const TARGET_TIER3_SERVICES: [&str; 3] = [
-    "wuauserv",  // Windows Update
     "SysMain",   // Superfetch / Prefetch memory defrag
     "DiagTrack", // Connected User Experiences and Telemetry
+    "Spooler",   // Print Spooler
 ];
 
 /// Query the current running status of a Windows service.
@@ -179,13 +180,18 @@ mod tests {
             stop_service("CryptSvc"),
             Err(SafetyViolationError::ProtectedService(_))
         ));
+
+        assert!(matches!(
+            stop_service("wuauserv"),
+            Err(SafetyViolationError::ProtectedService(_))
+        ));
     }
 
     #[test]
     fn test_query_tier3_service_state() {
-        // Query wuauserv without crashing or error
-        let status = query_service_state("wuauserv");
-        println!("wuauserv state: {:?}", status);
+        // Query SysMain without crashing or error
+        let status = query_service_state("SysMain");
+        println!("SysMain state: {:?}", status);
         assert!(status.is_ok());
     }
 }

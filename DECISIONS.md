@@ -96,3 +96,24 @@ This document records the foundational architectural decisions, justifications, 
 - **Consequences:**
   - Guarantees tamper-proof snapshot persistence; eliminates LPE vector; bounds recovery strictly to the local physical computer.
 
+---
+
+## ADR-008: De-Scoping of Aggressive & Unsubstantiated System Mutations (Phase P3)
+- **Date:** 2026-09-26
+- **Status:** `ACCEPTED`
+- **Context:**
+  Forensic audit and engineering review identified multiple aggressive system mutations commonly found in third-party gaming optimizers that lack empirical performance validation or induce system instability:
+  1. `EmptyWorkingSet`: Forcefully trims process working set memory to the standby list. Induces soft page faults, disk/paging activity, and frame hitching when shell/apps resume.
+  2. Windows QoS DSCP 46: Expedited Forwarding packet tagging is stripped or reset by residential ISPs and consumer routers, and carrier policers may drop tagged packets.
+  3. Automatic NIC Interrupt Moderation: Disabling interrupt moderation causes packet interrupt storms that saturate CPU Core 0 with DPCs under network throughput, causing severe frame pacing instability and audio crackling.
+  4. Automatic Windows Update (`wuauserv`) Disabling: Interferes with core OS security patching and driver maintenance.
+- **Decision:**
+  Permanently remove all four mutations from the automatic optimization pipeline:
+  1. Replace `EmptyWorkingSet` with passive, read-only memory diagnostics (`K32GetProcessMemoryInfo`).
+  2. Eliminate QoS DSCP 46 policy creation; retain read-only NetQosPolicy query diagnostics (`query_qos_policy`).
+  3. Eliminate automatic NIC Interrupt Moderation mutations; preserve driver defaults; maintain read-only adapter telemetry and RSS verification.
+  4. Reclassify Windows Update (`wuauserv`) to Tier 0 Protected (`MUST_NOT_MODIFY`); ensure default optimizer never pauses or disables core system services.
+- **Consequences:**
+  - *Positive:* Eliminates DPC interrupt storms, packet drop risks, soft page faults, and security update suppression. Keeps optimizer technical footprint strictly defensible.
+  - *Negative:* Optimization surface is narrowed to verified, high-impact subsystems (Game Mode, Power Scheme, Core Audio APO bypass).
+

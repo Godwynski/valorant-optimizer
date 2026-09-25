@@ -79,32 +79,10 @@ impl OptimizationCoordinator {
             }
         }
 
-        // Step 4: Network Adapter Latency & Flow Control Optimizations
-        if let Ok(primary_adapter) = val_opt_shared::hardware::network::NetworkAdapterInfo::detect_primary() {
-            match crate::network::optimize_adapter_latency_properties(&primary_adapter.adapter_name) {
-                Ok(mut backups) => {
-                    if let Ok(Some(fc_backup)) = crate::network::disable_flow_control(&primary_adapter.adapter_name) {
-                        backups.push(fc_backup);
-                    }
-                    info!("Optimized {} network adapter latency properties on {}", backups.len(), primary_adapter.adapter_name);
-                    transaction.previous_adapter_properties = backups;
-                }
-                Err(e) => {
-                    warn!("Network adapter latency optimization notice: {}. Continuing with remaining optimizations...", e);
-                }
-            }
-        }
-
-        // Step 5: Windows QoS DSCP Policy Registration
-        match crate::network::register_valorant_qos_policy() {
-            Ok(qos_backup) => {
-                info!("Registered VALORANT QoS DSCP 46 policy");
-                transaction.previous_qos_policy = Some(qos_backup);
-            }
-            Err(e) => {
-                warn!("QoS DSCP policy notice: {}. Continuing with remaining optimizations...", e);
-            }
-        }
+        // NOTE: Step 4 (NIC Adapter Properties / Interrupt Moderation) and Step 5 (Windows QoS DSCP)
+        // were PERMANENTLY REMOVED from the automatic optimization pipeline in Phase P3 (TASK-OPT-02 / TASK-OPT-03).
+        // Network adapter mutations risk link drops and DPC storms; QoS DSCP 46 tagging causes packet drops
+        // on residential ISPs and carrier policers. Network optimizations are de-scoped to passive read-only telemetry.
 
         transaction.is_applied = true;
 
@@ -256,5 +234,67 @@ mod tests {
 
         assert_eq!(restored_mode, initial_game_mode, "Game Mode must return to baseline after rollback");
         assert_eq!(restored_guid, initial_power_guid, "Power Scheme must return to baseline after rollback");
+    }
+
+    #[test]
+    fn test_p3_no_automatic_nic_or_interrupt_moderation_mutation() {
+        let _lock = SYSTEM_STATE_MUTEX.lock().unwrap();
+
+        // When applying optimizations through the automatic pipeline,
+        // network adapter properties and interrupt moderation MUST NOT be altered.
+        let tx = OptimizationCoordinator::apply_optimizations()
+            .expect("Optimization transaction should apply cleanly");
+
+        // Assert that zero adapter properties were modified
+        assert!(
+            tx.previous_adapter_properties.is_empty(),
+            "Automatic optimization path must NEVER mutate network adapter properties or interrupt moderation"
+        );
+
+        OptimizationCoordinator::rollback(&tx).expect("Rollback should succeed");
+    }
+
+    #[test]
+    fn test_p3_no_automatic_dscp_or_qos_mutation() {
+        let _lock = SYSTEM_STATE_MUTEX.lock().unwrap();
+
+        // When applying optimizations through the automatic pipeline,
+        // no Windows QoS DSCP policy must be created or registered.
+        let tx = OptimizationCoordinator::apply_optimizations()
+            .expect("Optimization transaction should apply cleanly");
+
+        assert!(
+            tx.previous_qos_policy.is_none(),
+            "Automatic optimization path must NEVER register QoS DSCP policies"
+        );
+
+        OptimizationCoordinator::rollback(&tx).expect("Rollback should succeed");
+    }
+
+    #[test]
+    fn test_p3_no_automatic_empty_working_set() {
+        let _lock = SYSTEM_STATE_MUTEX.lock().unwrap();
+
+        // Query memory before
+        let mem_before = crate::process::memory::query_current_process_memory()
+            .expect("Failed to query process memory before");
+
+        let tx = OptimizationCoordinator::apply_optimizations()
+            .expect("Optimization transaction should apply cleanly");
+
+        // Query memory after
+        let mem_after = crate::process::memory::query_current_process_memory()
+            .expect("Failed to query process memory after");
+
+        // In EmptyWorkingSet, process working set drops precipitously to < 100 KB.
+        // With read-only diagnostics and no working set trimming, memory remains stable and active.
+        assert!(
+            mem_after.working_set_bytes > 500_000,
+            "Working set must not be forcefully flushed by EmptyWorkingSet (was: {} bytes)",
+            mem_after.working_set_bytes
+        );
+        assert_eq!(mem_before.pid, mem_after.pid);
+
+        OptimizationCoordinator::rollback(&tx).expect("Rollback should succeed");
     }
 }

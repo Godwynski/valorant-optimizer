@@ -1,91 +1,68 @@
-//! Process Working Set Memory Trimmer.
+//! Process & System Memory Diagnostics (Read-Only).
 //!
-//! Flushes idle and cached working set memory (e.g. from Windows Explorer shell)
-//! back into standby/paged pool to maximize available physical RAM for VALORANT.
+//! Provides observational memory telemetry for host and process performance profiling.
+//!
+//! NOTE: Forced working-set trimming (`EmptyWorkingSet` / `K32EmptyWorkingSet` /
+//! `SetProcessWorkingSetSize`) was PERMANENTLY REMOVED in Phase P3 (`TASK-OPT-01`).
+//! Forcing pages out of process working sets induces soft page faults, disk I/O to the
+//! paging/standby list, and frame hitching when shell components or background apps resume.
+//! Modern Windows dynamically and efficiently manages the system working set.
 
-use tracing::{debug, info};
+use tracing::debug;
 use windows::Win32::Foundation::CloseHandle;
-use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
-};
-use windows::Win32::System::ProcessStatus::{K32EmptyWorkingSet, K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
-use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_SET_QUOTA};
+use windows::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+use windows::Win32::System::Threading::{GetCurrentProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
-/// Empty the working set of a target process by PID.
-/// Returns the number of bytes reclaimed (if any).
-pub fn trim_working_set(pid: u32) -> Result<usize, String> {
+/// Snapshot of process memory usage (read-only diagnostic).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessMemorySnapshot {
+    pub pid: u32,
+    pub working_set_bytes: usize,
+    pub peak_working_set_bytes: usize,
+    pub pagefile_usage_bytes: usize,
+    pub peak_pagefile_usage_bytes: usize,
+}
+
+/// Query process memory usage information without altering its working set (read-only diagnostic).
+pub fn query_process_memory_info(pid: u32) -> Result<ProcessMemorySnapshot, String> {
     unsafe {
-        let handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, false, pid)
-            .map_err(|e| format!("Failed to open PID {} with quota rights: {}", pid, e))?;
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+            .map_err(|e| format!("Failed to open PID {} for memory query: {}", pid, e))?;
 
         if handle.is_invalid() {
             return Err(format!("Invalid handle for PID {}", pid));
         }
 
-        let mut mem_before = PROCESS_MEMORY_COUNTERS::default();
-        let _ = K32GetProcessMemoryInfo(
+        let mut counters = PROCESS_MEMORY_COUNTERS::default();
+        let success = K32GetProcessMemoryInfo(
             handle,
-            &mut mem_before,
-            std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
-        );
-
-        let success = K32EmptyWorkingSet(handle);
-
-        let mut mem_after = PROCESS_MEMORY_COUNTERS::default();
-        let _ = K32GetProcessMemoryInfo(
-            handle,
-            &mut mem_after,
+            &mut counters,
             std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
         );
 
         let _ = CloseHandle(handle);
 
         if !success.as_bool() {
-            return Err("K32EmptyWorkingSet call failed".to_string());
+            return Err(format!("K32GetProcessMemoryInfo failed for PID {}", pid));
         }
 
-        let reclaimed = mem_before.WorkingSetSize.saturating_sub(mem_after.WorkingSetSize);
-        debug!(pid = pid, before = mem_before.WorkingSetSize, after = mem_after.WorkingSetSize, reclaimed = reclaimed, "Working set trimmed");
-        Ok(reclaimed)
+        let snapshot = ProcessMemorySnapshot {
+            pid,
+            working_set_bytes: counters.WorkingSetSize,
+            peak_working_set_bytes: counters.PeakWorkingSetSize,
+            pagefile_usage_bytes: counters.PagefileUsage,
+            peak_pagefile_usage_bytes: counters.PeakPagefileUsage,
+        };
+
+        debug!(pid = pid, working_set = snapshot.working_set_bytes, "Sampled process memory diagnostics");
+        Ok(snapshot)
     }
 }
 
-/// Find all active `explorer.exe` instances and trim their working set memory.
-/// Reclaims typically 100MB - 350MB of RAM without killing the Windows taskbar/shell.
-pub fn trim_explorer_working_set() -> Result<usize, String> {
-    let mut total_reclaimed = 0usize;
-
-    unsafe {
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-            .map_err(|e| format!("ToolHelp snapshot failed: {}", e))?;
-
-        let mut entry = PROCESSENTRY32W::default();
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-
-        if Process32FirstW(snapshot, &mut entry).is_ok() {
-            loop {
-                let name = String::from_utf16_lossy(&entry.szExeFile)
-                    .trim_matches('\0')
-                    .to_lowercase();
-
-                if name == "explorer.exe" {
-                    let pid = entry.th32ProcessID;
-                    if let Ok(bytes) = trim_working_set(pid) {
-                        total_reclaimed += bytes;
-                    }
-                }
-
-                if Process32NextW(snapshot, &mut entry).is_err() {
-                    break;
-                }
-            }
-        }
-
-        let _ = CloseHandle(snapshot);
-    }
-
-    info!(reclaimed_mb = total_reclaimed / (1024 * 1024), "Windows Explorer working set trimmed successfully");
-    Ok(total_reclaimed)
+/// Query memory usage of the current optimizer process.
+pub fn query_current_process_memory() -> Result<ProcessMemorySnapshot, String> {
+    let pid = unsafe { GetCurrentProcessId() };
+    query_process_memory_info(pid)
 }
 
 #[cfg(test)]
@@ -93,10 +70,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_trim_explorer_working_set() {
-        let result = trim_explorer_working_set();
-        assert!(result.is_ok(), "Explorer working set trimming should succeed: {:?}", result);
-        let bytes = result.unwrap();
-        println!("Explorer working set memory trimmed: {} KB", bytes / 1024);
+    fn test_query_process_memory_info_read_only() {
+        let snapshot = query_current_process_memory().expect("Should query current process memory");
+        assert!(snapshot.pid > 0, "PID must be non-zero");
+        assert!(snapshot.working_set_bytes > 0, "Working set must be non-zero");
+        assert!(snapshot.peak_working_set_bytes >= snapshot.working_set_bytes);
+        println!(
+            "Diagnostic memory telemetry: PID {} WorkingSet: {:.2} MB (Peak: {:.2} MB)",
+            snapshot.pid,
+            snapshot.working_set_bytes as f64 / (1024.0 * 1024.0),
+            snapshot.peak_working_set_bytes as f64 / (1024.0 * 1024.0)
+        );
+    }
+
+    #[test]
+    fn test_no_empty_working_set_invoked() {
+        // Sample before
+        let before = query_current_process_memory().expect("Memory before");
+        // Ensure that querying memory multiple times is purely observational and does not flush working set
+        let after = query_current_process_memory().expect("Memory after");
+        assert_eq!(before.pid, after.pid);
+        // Working set must remain stable and not drop to near-zero as EmptyWorkingSet would cause
+        assert!(after.working_set_bytes > 1_000_000, "Working set must not be forcefully flushed");
     }
 }

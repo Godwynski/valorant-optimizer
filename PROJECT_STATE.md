@@ -16,7 +16,7 @@ Single source of truth for execution status, active phases, and project health.
 - **Overall Status:** `POST_AUDIT_REMEDIATION`
 - **Audit Completion Date:** 2026-09-25
 - **Audit Verdict:** Previous claims of 10/10 phases (100%) and 38/38 tasks complete were **invalidated by forensic audit**. Critical security vulnerabilities, simulated benchmarks, unverified Vanguard claims, and dead code pathways were identified.
-- **Active Phase:** Phase P2 — Real Measurement & Telemetry (COMPLETE - GATE 2 READY)
+- **Active Phase:** Phase P3 — Optimization De-Scoping and Safety Cleanup (COMPLETE - READY FOR P4)
 - **Remediated Vulnerabilities (P0):**
   1. [RESOLVED] PowerShell Command Injection in `qos.rs`, `adapter.rs`, and `flow_control.rs` (TASK-SEC-01)
   2. [RESOLVED] Insecure `%ProgramData%` permissions (LPE vector) hardened to SYSTEM/Admins full, Users read-only (TASK-SEC-02)
@@ -29,28 +29,33 @@ Single source of truth for execution status, active phases, and project health.
   3. [RESOLVED] VALORANT game launch flow completed with ProgramData detection, URI fallback, and UI error handling (P1-03 / TASK-FUNC-03)
   4. [RESOLVED] Token-safe application relaunch and game launch de-escalation via `CreateProcessAsUserW` (P1-04 / TASK-FUNC-04)
   5. [RESOLVED] Machine-specific toolchain paths eradicated; portable `vswhere` and environment discovery enforced (P1-05 / TASK-FUNC-05)
-- **Completed Telemetry & Measurement Upgrades (P2 Final Remediation):**
-  1. [RESOLVED] Option A Measurement Semantics: Explicitly narrowed to Application Present Cadence (`MsBetweenPresents`) measuring intervals between consecutive application `Present_Start` calls. Physical display frame arrival (`MsUntilDisplayed`) is marked `UNVERIFIED` and all fabricated display latency offsets (`+ 0.8ms`) have been eradicated.
-  2. [RESOLVED] Kernel Driver Isolator hardened: Synthetic driver addresses eliminated. Unverified KASLR drivers resolve strictly to `UnknownKernelRoutine` with zero fake base addresses (`test_unverified_driver_never_attributed`).
-  3. [RESOLVED] Statistical Design & Data Flow: Primary parametric analysis is Paired Student's t-test ($D_i = B_i - A_i$); Welch's t-test is designated as "Secondary independent-sample diagnostic"; paired difference bootstrap resamples matched pairs $(A_k, B_k)$ with replacement to preserve block covariance. Inferential statistical unit is $N$ independent benchmark trials ($N = 10$), never raw frame counts.
-  4. [RESOLVED] Practical Significance Threshold: Redefined strictly as "Project-defined practical significance threshold: 3%". "MCID / Minimum Clinically Important Difference" wording eradicated. Cohen's $d$ retained as separate standardized effect size.
-  5. [RESOLVED] Overhead Classification Separated: In-memory ingestion benchmark (<0.001% CPU) classified as `TEST-VERIFIED`. Live ETW capture and complete production telemetry classified as `UNVERIFIED` due to non-elevated host test environment.
-  6. [RESOLVED] All 136 workspace unit and integration tests passing with 0 failures (`cargo test --workspace`).
+- **Completed Telemetry & Measurement Upgrades (P2):**
+  1. [RESOLVED] Option A Measurement Semantics: Application Present Cadence (`MsBetweenPresents`) measuring intervals between consecutive application `Present_Start` calls. Physical display frame arrival (`MsUntilDisplayed`) marked `UNVERIFIED` and all fabricated display offsets eradicated.
+  2. [RESOLVED] Kernel Driver Isolator hardened: Synthetic driver addresses eliminated. Unverified KASLR drivers resolve strictly to `UnknownKernelRoutine`.
+  3. [RESOLVED] Statistical Design & Data Flow: Paired Student's t-test with block-resampling paired bootstrap. Inferential unit is $N = 10$ benchmark trials.
+  4. [RESOLVED] Practical Significance Threshold: Redefined strictly as "Project-defined practical significance threshold: 3%".
+  5. [RESOLVED] Overhead Classification Separated: In-memory ingestion benchmark (<0.001% CPU) classified as `TEST-VERIFIED`. Live ETW capture classified as `UNVERIFIED` due to non-elevated host test environment.
+- **Completed Optimization De-Scoping & Safety Cleanup (P3):**
+  1. [RESOLVED] Forced working-set memory trimming (`EmptyWorkingSet` / `K32EmptyWorkingSet` / `SetProcessWorkingSetSize`) completely eradicated from automatic optimization paths. Replaced with read-only diagnostic memory telemetry (`query_process_memory_info`).
+  2. [RESOLVED] Windows QoS DSCP policy mutation (DSCP 46) permanently removed from automatic optimization pipeline. Network QoS registry writes eliminated. Retained as passive read-only diagnostic inspection (`qos-check`).
+  3. [RESOLVED] Automatic NIC Interrupt Moderation and driver property mutations removed. Driver settings remain at OEM defaults to prevent Core 0 DPC interrupt storms and link drops. Read-only RSS and link telemetry retained.
+  4. [RESOLVED] Service & Bloatware Audit: Windows Update (`wuauserv`) moved to Tier 0 Protected (`MUST_NOT_MODIFY`). Core system services, Defender, and Vanguard protected from termination/disabling. Tier 3 service pauses (`SysMain`, `DiagTrack`, `Spooler`) restricted to user opt-in with full rollback.
+  5. [RESOLVED] Automatic optimization pipeline restricted strictly to safe, verified Win32 subsystems: Game Mode (`HKCU\Software\Microsoft\GameBar`), Power Scheme (`PowerSetActiveScheme` on desktop AC), and Core Audio APO bypass (`MMDevices\Audio\Render`). All 140 workspace tests passing cleanly.
 
 ---
 
-## 3. Subsystem Health Matrix (Post-P2 Baseline)
+## 3. Subsystem Health Matrix (Post-P3 Baseline)
 
 | Subsystem | Audit Status | Identified Issues / Deficiencies | Action Required |
 | :--- | :---: | :--- | :--- |
-| **Hardware Detection** | `VALIDATED` | CPU EfficiencyClass correctly aligned with Win32 MSDN; monolithic / hybrid / multi-tier verified | Phase P1 Complete; HAGS in P3 |
+| **Hardware Detection** | `VALIDATED` | CPU EfficiencyClass correctly aligned with Win32 MSDN; monolithic / hybrid / multi-tier verified | Phase P1 Complete |
 | **Benchmarking Engine** | `VALIDATED` | Genuine Windows ETW DXGI/D3D presentation capture with interleaved A/B runner and robust non-parametric stats | Phase P2 Complete |
-| **Safe Optimizations** | `VALIDATED` | Game Mode and Desktop Power Scheme verified on host | Retain safe defaults; fix SYSTEM registry hive in P3 |
-| **Process Management** | `VALIDATED` | ProcessSupervisor wired; token-safe relaunch via `CreateProcessAsUserW` active; path validation | Phase P1 Complete |
-| **Network Engine** | `SECURED` | Command injection eradicated. High-risk tweaks (DSCP 46, Interrupt Moderation auto-disable) await Phase P3 | De-scope DSCP 46; refactor Interrupt Moderation in P3 |
+| **Safe Optimizations** | `VALIDATED` | Game Mode, Desktop Power Scheme, Audio APO bypass active; NIC/QoS/EmptyWorkingSet removed | Phase P3 Complete |
+| **Process Management** | `VALIDATED` | ProcessSupervisor wired; token-safe relaunch via `CreateProcessAsUserW` active; path validation; wuauserv protected | Phase P3 Complete |
+| **Network Engine** | `VALIDATED` | Passive read-only diagnostics active (RSS, Bufferbloat, UDP ping). Automatic DSCP and Interrupt Moderation removed | Phase P3 Complete |
 | **Kernel Latency ETW** | `VALIDATED` | Genuine Windows NT Kernel Logger ETW tracing; DPC/ISR duration via QPC; module resolution via EnumDeviceDrivers | Phase P2 Complete |
-| **Native Slint GUI** | `VALIDATED` | UI renders cleanly; game launch wired with error reporting; Ephemeral UI unload vs minimize setting added | Phase P1 Complete |
-| **Rollback & Safety** | `SECURED` | Cryptographic HMAC-SHA256 integrity active; post-match relaunch integrated with token safety | Phase P1 Complete |
+| **Native Slint GUI** | `VALIDATED` | UI renders cleanly; game launch wired with error reporting; DSCP/Interrupt Mod claims removed; read-only badges | Phase P3 Complete |
+| **Rollback & Safety** | `SECURED` | Cryptographic HMAC-SHA256 integrity active; post-match relaunch integrated with token safety; atomic rollback | Phase P1/P3 Complete |
 | **Vanguard Validation** | `UNVERIFIED` | 100-match verification was a 0.00s mock loop; zero live match validation | Retract 100% compliance claims; test real handles in P4 |
 | **Packaging & Release** | `HARDENED` | Portable toolchain discovery via `vswhere`; zero hardcoded developer paths in build/scripts | Inno compiler build in P4 |
 
@@ -62,15 +67,15 @@ Single source of truth for execution status, active phases, and project health.
 | :--- | :--- | :---: | :--- |
 | **Phase P0** | Security & Vulnerability Remediation | `COMPLETE` | Zero command injection, secure ACLs, secure named pipe, HMAC integrity, path restrictions |
 | **Phase P1** | Functional Fixes & Dead Code Elimination | `COMPLETE` | P/E core topology fixed; supervisor & relaunch wired; portable build |
-| **Phase P2** | Real Measurement & Benchmarking | `COMPLETE (Awaiting Sign-Off)` | True ETW ingestion; interleaved A/B harness; non-parametric stats |
-| **Phase P3** | Optimization De-scoping & Refactoring | `PENDING_REVIEW` | Snake oil removed; high-risk tweaks removed; safe defaults active |
-| **Phase P4** | Honest Documentation & Production Packaging | `PENDING_REVIEW` | False claims retracted; real installer built; VM lifecycle tested |
+| **Phase P2** | Real Measurement & Benchmarking | `COMPLETE` | True ETW ingestion; interleaved A/B harness; non-parametric stats |
+| **Phase P3** | Optimization De-scoping & Safety Cleanup | `COMPLETE` | EmptyWorkingSet removed; DSCP removed; Interrupt Moderation removed; wuauserv protected |
+| **Phase P4** | Honest Documentation & Production Packaging | `PENDING_AUTHORIZATION` | False claims retracted; real installer built; VM lifecycle tested |
 
 ---
 
 ## 5. Next Immediate Action
-- Await user review and formal authorization of **Gate 2: Real Measurement Sign-Off**.
-- Do NOT proceed to Phase P3 until user explicitly authorizes.
+- Await user review and formal authorization of **Gate 3: P3 Sign-Off**.
+- Do NOT proceed to Phase P4 until user explicitly authorizes.
 
 ---
 

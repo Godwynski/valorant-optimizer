@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use val_opt_core::benchmarking::ab_runner::{ABBenchmarkConfig, ABBenchmarkRunner};
 use val_opt_core::network::probe::{MockUdpEchoServer, UdpPingCollector, UdpProbeConfig};
 use val_opt_core::optimizations::OptimizationCoordinator;
-use val_opt_core::process::memory::trim_explorer_working_set;
+use val_opt_core::process::memory::query_current_process_memory;
 use val_opt_core::process::services::{pause_tier3_services, restore_tier3_services};
 use val_opt_core::process::terminator::terminate_tier2_background_processes;
 use val_opt_shared::models::system::FullSystemManifest;
@@ -143,18 +143,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!(" - NIC Properties:    {}", snapshot.previous_adapter_properties.len());
             eprintln!("[Snapshot captured in {:?}]", duration);
         }
-        "trim-memory" => {
-            println!("Trimming Windows Explorer working set memory cache...");
-            let start = std::time::Instant::now();
-            let bytes_reclaimed = trim_explorer_working_set()
-                .map_err(|e| format!("Working set trim failed: {}", e))?;
-            let duration = start.elapsed();
-
-            println!(
-                "Successfully reclaimed {:.2} MB of physical RAM from Explorer working set",
-                (bytes_reclaimed as f64) / (1024.0 * 1024.0)
-            );
-            eprintln!("[Memory trim completed in {:?}]", duration);
+        "trim-memory" | "memory-status" => {
+            println!("Process Working Set Trimming Notice:");
+            println!("  [DE-SCOPED] Forced working set trimming (EmptyWorkingSet) was permanently");
+            println!("  removed in Phase P3 safety cleanup. It induces soft page faults, standby list");
+            println!("  paging, and micro-stuttering. Windows dynamically manages physical RAM.");
+            println!();
+            if let Ok(mem) = query_current_process_memory() {
+                println!("Diagnostic Telemetry (Current Process):");
+                println!("  PID:                   {}", mem.pid);
+                println!("  Working Set:           {:.2} MB", mem.working_set_bytes as f64 / (1024.0 * 1024.0));
+                println!("  Peak Working Set:      {:.2} MB", mem.peak_working_set_bytes as f64 / (1024.0 * 1024.0));
+            }
         }
         "purge-bloat" => {
             println!("Scanning and terminating safe Tier 2 bloatware (CEF, browsers, secondary launchers)...");
@@ -170,7 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("\n[Process purge completed in {:?}]", duration);
         }
         "pause-services" => {
-            println!("Pausing non-essential Tier 3 background services (wuauserv, SysMain, DiagTrack)...");
+            println!("Pausing non-essential Tier 3 background services (SysMain, DiagTrack, Spooler)...");
             let start = std::time::Instant::now();
             let backups = pause_tier3_services();
             let duration = start.elapsed();
@@ -182,7 +182,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("\n[Services paused in {:?}]", duration);
         }
         "resume-services" => {
-            println!("Resuming non-essential Tier 3 background services (wuauserv, SysMain, DiagTrack)...");
+            println!("Resuming non-essential Tier 3 background services (SysMain, DiagTrack, Spooler)...");
             let start = std::time::Instant::now();
             let backups: Vec<val_opt_shared::models::process::ServiceBackup> = val_opt_core::process::services::TARGET_TIER3_SERVICES
                 .iter()
@@ -395,19 +395,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Usage: val-opt-cli <command> [options]");
             println!("\nCommands:");
             println!("  inspect                 Scans and outputs comprehensive system hardware & security manifest");
-            println!("  optimize                Applies safe optimizations (Game Mode, Power Plan, Audio APOs, NIC Latency, QoS)");
+            println!("  optimize                Applies safe optimizations (Game Mode, Power Plan, Audio APOs)");
             println!("  restore                 Restores system settings to baseline from transaction snapshot");
             println!("  rollback [path]         Failsafe emergency rollback: validates SHA-256 and restores all settings");
             println!("  vanguard-check          Validates all Riot Vanguard anti-cheat prerequisites (vgc, vgk, secure boot, VBS)");
             println!("  snapshot [path]         Captures complete baseline system state into an atomic SHA-256 verified snapshot");
             println!("  net-inspect             Queries active NIC advanced properties, Flow Control, and RSS multi-queues");
             println!("  bufferbloat [ip:port]   Measures unloaded vs loaded ping & jitter; calculates bufferbloat grade (A+ to F)");
-            println!("  qos-check               Inspects active Windows QoS DSCP 46 policies");
+            println!("  qos-check               Inspects active Windows QoS policies (Read-Only diagnostic)");
             println!("  latency-test [secs]     Profiles kernel DPC/ISR execution times, flags drivers > 500µs");
             println!("  drivers                 Enumerates loaded Windows kernel device drivers and base addresses");
-            println!("  trim-memory             Flushes Windows Explorer working set to reclaim physical RAM");
+            println!("  trim-memory             Displays memory status (forced trimming permanently de-scoped in Phase P3)");
             println!("  purge-bloat             Gracefully terminates Tier 2 background processes (CEF, browsers)");
-            println!("  pause-services          Pauses Tier 3 non-essential services (wuauserv, SysMain, DiagTrack)");
+            println!("  pause-services          Pauses Tier 3 non-essential services (SysMain, DiagTrack, Spooler)");
             println!("  resume-services         Resumes Tier 3 non-essential services post-match");
             println!("  benchmark [trials]      Runs multi-trial A/B benchmark (default: 10 trials) with Student's t-test");
             println!("  ping-probe [ip:port]    Measures high-precision UDP round-trip latency, jitter, and packet loss");

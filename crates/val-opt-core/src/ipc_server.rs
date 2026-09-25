@@ -135,14 +135,9 @@ impl IpcServer {
             }
 
             IpcRequest::TrimWorkingSet => {
-                match crate::process::memory::trim_explorer_working_set() {
-                    Ok(bytes) => IpcResponse::WorkingSetTrimmed {
-                        bytes_reclaimed: bytes,
-                    },
-                    Err(e) => IpcResponse::Error {
-                        code: "TRIM_FAILED".to_string(),
-                        message: e,
-                    },
+                IpcResponse::Error {
+                    code: "FEATURE_REMOVED".to_string(),
+                    message: "Process working set trimming (EmptyWorkingSet) was permanently removed in Phase P3 safety cleanup (causes soft page faults and frame hitching). Windows manages physical RAM automatically.".to_string(),
                 }
             }
 

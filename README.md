@@ -44,16 +44,14 @@ Most "gaming optimizers" are bloated web apps packaged inside Chromium/Electron 
 - **Adaptive Power Scheme Management:** Enforces ultimate gaming power profiles on desktop platforms while preserving balanced thermal throttling profiles on mobile/laptop hardware.
 
 ### 🧹 4. Tiered Process & Service Supervisor
-- **Strict Tier Classification:** Categorizes system processes into Tier 0 (Protected/Kernel/Vanguard), Tier 1 (Display/Audio drivers), Tier 2 (Safe bloatware: Discord, CEF, browsers), and Tier 3 (Background services).
+- **Strict Tier Classification:** Categorizes system processes into Tier 0 (Protected/Kernel/Vanguard/Windows Update), Tier 1 (Display/Audio drivers), Tier 2 (Safe bloatware: Discord, CEF, browsers), and Tier 3 (Background services: SysMain, DiagTrack, Spooler).
 - **Graceful Bloat Purge:** Sends `WM_CLOSE` (with a 1000ms graceful fallback) to background web wrappers before launching the game.
-- **RAM Working Set Trimmer:** Calls Win32 `EmptyWorkingSet` on `explorer.exe` to reclaim up to hundreds of megabytes of physical RAM.
-- **Service Suspension:** Pauses non-essential services (`wuauserv`, `SysMain`, `DiagTrack`) during matches and resumes them automatically upon game exit.
+- **Process Memory Telemetry:** Observational working set and pagefile diagnostics via `K32GetProcessMemoryInfo` (forced `EmptyWorkingSet` trimming permanently de-scoped in Phase P3 to prevent soft page faults and micro-stuttering).
+- **Service Suspension (User-Controlled):** Pauses non-essential services (`SysMain`, `DiagTrack`, `Spooler`) during matches and resumes them automatically upon game exit (`wuauserv` protected under Tier 0).
 
-### 🌐 5. High-Performance Network Engine
-- **NIC Physical Tuning:** Automatically disables Energy Efficient Ethernet (`*EEE`) and Green Ethernet to eliminate PHY wake latencies.
-- **Interrupt Moderation & Flow Control:** Tunes NIC interrupt moderation and disables 802.3x Flow Control to prevent packet queuing stalls.
-- **Receive Side Scaling (RSS) Validation:** Verifies hardware multi-queue packet distribution across CPU cores.
-- **DSCP 46 Expedited Forwarding QoS:** Registers local Group Policy QoS rules tagging VALORANT UDP game packets (ports 7000–8000) for highest network prioritization.
+### 🌐 5. Read-Only Network Diagnostics & Hardware Validation
+- **Receive Side Scaling (RSS) Validation:** Verifies hardware multi-queue packet distribution across CPU cores (Read-Only).
+- **Network Interface Telemetry:** Inspects physical NIC properties, link speed, and MTU (automatic Interrupt Moderation mutation and DSCP 46 tagging permanently de-scoped in Phase P3 to prevent DPC interrupt storms and carrier packet drops).
 - **Bufferbloat & UDP Jitter Diagnostics:** Built-in network health evaluator calculating loaded vs. unloaded latency, jitter, and bufferbloat grade (A+ to F).
 
 ### ⏱️ 6. Kernel ETW Latency & Driver Profiler
@@ -136,10 +134,13 @@ Most "gaming optimizers" are bloated web apps packaged inside Chromium/Electron 
 | **VBS / HVCI / TPM Disabling** | ❌ **PROHIBITED** | Explicitly blocked to protect against `VAN 9005` competitive lockouts. |
 | **Realtime Process Priority** | ❌ **PROHIBITED** | Priority ceiling enforced at `HIGH_PRIORITY_CLASS` (preserves Vanguard heartbeats & audio). |
 | **Standby Memory Purging** | ❌ **PROHIBITED** | Windows Memory Manager handles cache eviction; avoids disk micro-freezes. |
+| **Forced Working-Set Trimming (`EmptyWorkingSet`)** | ❌ **PROHIBITED** | Permanently removed in Phase P3. Induces soft page faults and frame hitching. |
+| **NIC Interrupt Moderation Mutation** | ❌ **PROHIBITED** | Permanently removed in Phase P3. Induces DPC interrupt storms on Core 0. |
+| **QoS DSCP 46 Packet Tagging** | ❌ **PROHIBITED** | Permanently removed in Phase P3. Stripped or dropped by residential ISPs/policers. |
+| **Windows Update (`wuauserv`) Disabling** | ❌ **PROHIBITED** | Protected under Tier 0 (MUST_NOT_MODIFY). OS security updates must never be disabled. |
 | **CPU Core Affinity Masking** | ✅ **PERMITTED** | Standard Win32 `SetProcessAffinityMask` used to assign game threads to P-cores. |
 | **Process Priority Adjustment** | ✅ **PERMITTED** | Standard Win32 `SetPriorityClass(HIGH_PRIORITY_CLASS)`. |
-| **Windows Service Management** | ✅ **PERMITTED** | Win32 Service Control Manager (`ControlService`) used to pause non-critical services. |
-| **NIC Advanced Property Tuning** | ✅ **PERMITTED** | Standard NDIS/CIM configuration (EEE off, Interrupt Moderation tuning). |
+| **Non-Essential Service Pausing** | ✅ **PERMITTED** | Win32 SCM (`ControlService`) used to pause non-critical services (SysMain, DiagTrack, Spooler). |
 
 ---
 
@@ -157,9 +158,9 @@ valorant-optimizer/
 │   ├── val-opt-core/         # Headless native background daemon & telemetry engine
 │   │   ├── src/benchmarking/ # PresentMon ETW frame-time ingestion, automated A/B runner
 │   │   ├── src/latency/      # Kernel ETW DPC/ISR event session & faulty driver isolator
-│   │   ├── src/network/      # NIC adapter tuning, RSS validation, QoS DSCP 46, bufferbloat
+│   │   ├── src/network/      # NIC telemetry, RSS validation, bufferbloat diagnostics
 │   │   ├── src/optimizations/# Game Mode, Core Audio APO DSP disabler, power plan manager
-│   │   ├── src/process/      # Tiered safety DB, terminator, Explorer memory trimmer, supervisor
+│   │   ├── src/process/      # Tiered safety DB, terminator, memory diagnostics, supervisor
 │   │   ├── src/safety/       # Vanguard pre-flight checker & compliance auditor
 │   │   └── src/state/        # Atomic state snapshots & boot crash recovery service
 │   ├── val-opt-cli/          # Command-line administrative, diagnostic & rollback tool
@@ -194,12 +195,12 @@ val-opt-cli <command> [options]
 | `snapshot` | `[output_path]` | Captures complete baseline system state into an atomic SHA-256 verified snapshot. |
 | `net-inspect` | — | Displays active NIC properties, Energy Efficient Ethernet, Flow Control, and RSS multi-queues. |
 | `bufferbloat` | `[host:port]` | Measures unloaded vs. loaded ping and jitter; calculates bufferbloat grade (A+ to F). |
-| `qos-check` | — | Queries active Windows QoS DSCP policies for VALORANT. |
+| `qos-check` | — | Inspects active Windows QoS policies (Read-Only diagnostic). |
 | `latency-test` | `[seconds]` | Runs kernel ETW session measuring real-time DPC/ISR execution times; flags drivers > 500 µs. |
 | `drivers` | — | Enumerates loaded Windows kernel device drivers (`.sys`) and base memory addresses. |
-| `trim-memory` | — | Flushes `explorer.exe` working set to reclaim physical RAM. |
+| `trim-memory` | — | Displays memory status (forced trimming permanently de-scoped in Phase P3). |
 | `purge-bloat` | — | Gracefully closes Tier 2 background processes (Discord, browsers, CEF helpers). |
-| `pause-services`| — | Pauses non-essential Tier 3 Windows services (`wuauserv`, `SysMain`, `DiagTrack`). |
+| `pause-services`| — | Pauses non-essential Tier 3 Windows services (`SysMain`, `DiagTrack`, `Spooler`). |
 | `resume-services`| — | Resumes paused Tier 3 Windows services. |
 | `benchmark` | `[trials]` | Executes multi-trial A/B benchmark (default: 10 trials) and calculates Student's t-test. |
 | `ping-probe` | `[host:port]` | Sends high-precision UDP probes measuring RTT latency, packet jitter, and packet loss. |

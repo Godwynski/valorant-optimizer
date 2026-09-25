@@ -122,21 +122,23 @@ Complete checklist of all 38 discrete engineering tasks across the 10 execution 
   - **Completion Criteria:** Attempting to classify `vgc.exe`, `csrss.exe`, or `dwm.exe` as Tier 2 or 3 triggers a hard compile/runtime error.
   - **Status:** `COMPLETE`
 
-- [x] **`TASK-P04-002`**: Graceful Process Termination & Working Set Trimmer
-  - **Objective:** Implement safe termination engine with two-stage exit (`WM_CLOSE` -> 1000ms wait -> `TerminateProcess`) and RAM working set trimming for Explorer.
+- [x] **`TASK-P04-002`**: Graceful Process Termination & Memory Diagnostics
+  - **Objective:** Implement safe termination engine with two-stage exit (`WM_CLOSE` -> 1000ms wait -> `TerminateProcess`) and RAM diagnostics.
   - **Files / Components:** `crates/val-opt-core/src/process/terminator.rs`, `crates/val-opt-core/src/process/memory.rs`.
-  - **Requirements:** Terminate safe Tier 2 targets gracefully; record process paths for post-match relaunch; call `EmptyWorkingSet` on `explorer.exe`.
-  - **Verification Method:** Launch test instances of notepad and browser; verify graceful exit and working set memory reduction.
+  - **Requirements:** Terminate safe Tier 2 targets gracefully; record process paths for post-match relaunch; query memory via `K32GetProcessMemoryInfo`.
+  - **Phase P3 Remediation Note:** Forced `EmptyWorkingSet` trimming was permanently removed in Phase P3 (`TASK-OPT-01`) to eliminate soft page faults and micro-stutters; replaced with read-only memory diagnostics.
+  - **Verification Method:** Launch test instances of notepad and browser; verify graceful exit and diagnostic telemetry.
   - **Completion Criteria:** Clean termination of Tier 2 processes without process tree leaks or orphaned handles.
-  - **Status:** `COMPLETE`
+  - **Status:** `COMPLETE (REMEDIATED IN P3)`
 
 - [x] **`TASK-P04-003`**: Non-Essential Windows Service Pauser
-  - **Objective:** Implement service management module to pause and resume Tier 3 background services (`wuauserv`, `SysMain`, `DiagTrack`).
-  - **Files / Components:** `crates/val-opt-core/src/process/services.rs`.
+  - **Objective:** Implement service management module to pause and resume Tier 3 background services (`SysMain`, `DiagTrack`, `Spooler`).
+  - **Files / Components:** `crates/val-opt-core/src/process/services.rs`, `crates/val-opt-core/src/process/safety_db.rs`.
   - **Requirements:** Use Windows Service Control Manager (`OpenSCManagerW`, `OpenServiceW`, `ControlService`) to send `SERVICE_CONTROL_STOP`; record previous service running state.
+  - **Phase P3 Remediation Note:** Windows Update (`wuauserv`) was moved to Tier 0 Protected (`MUST_NOT_MODIFY`) in Phase P3 (`TASK-OPT-04`). Default optimizer never disables Windows Update.
   - **Verification Method:** Verify services enter Stopped state during gaming and resume Running state upon restoration.
   - **Completion Criteria:** Services start and stop safely without registry corruption or service hangs.
-  - **Status:** `COMPLETE`
+  - **Status:** `COMPLETE (REMEDIATED IN P3)`
 
 - [x] **`TASK-P04-004`**: VALORANT Process Lifecycle Supervisor
   - **Objective:** Implement game lifecycle watcher monitoring for `VALORANT-Win64-Shipping.exe`.
@@ -150,29 +152,31 @@ Complete checklist of all 38 discrete engineering tasks across the 10 execution 
 
 ## Phase 5: Network Optimization & Diagnostics
 
-- [x] **`TASK-P05-001`**: NIC Property Configurator (EEE & Interrupt Moderation)
-  - **Objective:** Programmatically configure physical network adapter to disable Energy Efficient Ethernet (EEE) and tune Interrupt Moderation.
+- [x] **`TASK-P05-001`**: NIC Property Diagnostics (Read-Only)
+  - **Objective:** Programmatically query physical network adapter properties and validate hardware configuration.
   - **Files / Components:** `crates/val-opt-core/src/network/adapter.rs`.
-  - **Requirements:** Query active adapter via CIM/WMI/NetAdapter, set `*EEE` = 0 (Disabled), `*GreenEthernet` = 0 (Disabled), and `*InterruptModeration` = Low or Disabled; record original settings.
-  - **Verification Method:** Check adapter advanced properties in Windows Device Manager before and after application.
-  - **Completion Criteria:** Properties applied without network link drop lasting > 1.5 seconds; full rollback supported.
-  - **Status:** `COMPLETE`
+  - **Requirements:** Query active adapter via CIM/WMI/NetAdapter; inspect property values; support rollback for any legacy applied settings.
+  - **Phase P3 Remediation Note:** Automatic Interrupt Moderation mutation was permanently removed in Phase P3 (`TASK-OPT-03`). Disabling interrupt moderation induces severe DPC interrupt storms and high latency on Core 0. Driver defaults are preserved.
+  - **Verification Method:** Check adapter advanced properties in Windows Device Manager before and after inspection.
+  - **Completion Criteria:** Properties queried without network link drop lasting > 1.5 seconds; automatic driver mutations eliminated.
+  - **Status:** `COMPLETE (REMEDIATED IN P3)`
 
 - [x] **`TASK-P05-002`**: Flow Control & RSS Verifier
-  - **Objective:** Verify Receive Side Scaling (RSS) is active and disable 802.3x Flow Control on the primary network interface.
+  - **Objective:** Verify Receive Side Scaling (RSS) is active and inspect Flow Control on the primary network interface.
   - **Files / Components:** `crates/val-opt-core/src/network/flow_control.rs`.
-  - **Requirements:** Ensure Flow Control is disabled (to avoid UDP packet stalling) and RSS has $\ge 4$ queues allocated.
+  - **Requirements:** Ensure Flow Control query functions reliably and RSS has $\ge 4$ queues allocated.
   - **Verification Method:** Verify settings via PowerShell `Get-NetAdapterAdvancedProperty` and netsh.
-  - **Completion Criteria:** Successfully disables Flow Control and validates RSS queue distribution.
+  - **Completion Criteria:** Successfully reads Flow Control and validates RSS queue distribution.
   - **Status:** `COMPLETE`
 
-- [x] **`TASK-P05-003`**: Windows QoS DSCP Policy Registrar
-  - **Objective:** Register a local QoS policy tagging VALORANT UDP outbound packets with DSCP 46 (Expedited Forwarding).
+- [x] **`TASK-P05-003`**: Windows QoS DSCP Policy Diagnostic (Read-Only)
+  - **Objective:** Inspect registered Windows QoS policies without mutating system network policies.
   - **Files / Components:** `crates/val-opt-core/src/network/qos.rs`.
-  - **Requirements:** Create Group Policy / Windows QoS policy rule matching `VALORANT-Win64-Shipping.exe` port range 7000-8000 with DSCP 46; ensure rollback removes rule.
+  - **Requirements:** Query active NetQosPolicy rules via PowerShell `Get-NetQosPolicy`.
+  - **Phase P3 Remediation Note:** Automatic creation of DSCP 46 QoS policies was permanently removed in Phase P3 (`TASK-OPT-02`). Residential ISPs strip DSCP tags and carrier policers drop packets. Retained strictly as a read-only diagnostic inspection tool (`query_qos_policy`).
   - **Verification Method:** Verify policy entry using PowerShell `Get-NetQosPolicy` and check IP header DSCP field via Wireshark.
-  - **Completion Criteria:** QoS policy successfully registered and unregisters cleanly on rollback.
-  - **Status:** `COMPLETE`
+  - **Completion Criteria:** Read-only inspection operates without registry modification or packet tagging.
+  - **Status:** `COMPLETE (REMEDIATED IN P3)`
 
 - [x] **`TASK-P05-004`**: Bufferbloat & Network Health Diagnostic Runner
   - **Objective:** Implement standalone network quality test measuring loaded vs unloaded ping and jitter.
