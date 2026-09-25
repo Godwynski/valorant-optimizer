@@ -61,7 +61,7 @@ impl IpcServer {
             IpcRequest::GetStatus => {
                 let primary_adapter = val_opt_shared::hardware::network::NetworkAdapterInfo::detect_primary().ok();
                 let adapter_name = primary_adapter.map(|a| a.adapter_name).unwrap_or_else(|| "Unknown".to_string());
-                let is_game_running = crate::process::supervisor::ProcessSupervisor::find_process_by_name(
+                let is_game_running = crate::process::supervisor::ProcessSupervisor::find_process_with_path(
                     crate::process::supervisor::VALORANT_BINARY_NAME,
                 ).is_some();
                 IpcResponse::Status {

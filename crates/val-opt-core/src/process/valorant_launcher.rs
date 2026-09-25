@@ -208,9 +208,9 @@ impl ValorantLauncher {
     pub fn launch_game() -> Result<String, ValorantLaunchError> {
         info!("Initiating VALORANT game launch flow");
 
-        // 1. Check if game is already running
-        if let Some(pid) = super::supervisor::ProcessSupervisor::find_process_by_name(VALORANT_BINARY_NAME) {
-            info!(pid = pid, "VALORANT is already running; lifecycle supervisor attaching directly");
+        // 1. Check if genuine game is already running with verified executable path
+        if let Some((pid, path)) = super::supervisor::ProcessSupervisor::find_process_with_path(VALORANT_BINARY_NAME) {
+            info!(pid = pid, path = %path, "Genuine VALORANT process is already running; lifecycle supervisor attaching directly");
             return Ok(format!("VALORANT is already running (PID {}). Supervisor attached.", pid));
         }
 
@@ -255,6 +255,9 @@ impl ValorantLauncher {
                 }
 
                 let mut cmd = std::process::Command::new(riot_exe);
+                if let Some(parent) = riot_exe.parent() {
+                    cmd.current_dir(parent);
+                }
                 cmd.arg("--launch-product=valorant");
                 cmd.arg("--launch-patchline=live");
 
@@ -425,9 +428,11 @@ mod tests {
 
     #[test]
     fn test_already_running_game_detection() {
-        // Create a temporary mock binary named VALORANT-Win64-Shipping.exe
+        // Create a temporary mock binary structured as ShooterGame/Binaries/Win64/VALORANT-Win64-Shipping.exe
         let temp_dir = std::env::temp_dir();
-        let mock_game = temp_dir.join(VALORANT_BINARY_NAME);
+        let target_dir = temp_dir.join("valopt_test_shootergame").join("ShooterGame").join("Binaries").join("Win64");
+        let _ = std::fs::create_dir_all(&target_dir);
+        let mock_game = target_dir.join(VALORANT_BINARY_NAME);
         let windir = std::env::var("windir").unwrap_or_else(|_| r"C:\Windows".to_string());
         let src = std::path::PathBuf::from(windir).join("System32").join("cmd.exe");
         let _ = std::fs::copy(&src, &mock_game);
@@ -451,6 +456,7 @@ mod tests {
                 let _ = c.wait();
             }
             let _ = std::fs::remove_file(&mock_game);
+            let _ = std::fs::remove_dir_all(temp_dir.join("valopt_test_shootergame"));
         }
     }
 

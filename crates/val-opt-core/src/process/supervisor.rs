@@ -95,7 +95,20 @@ impl ProcessSupervisor {
         }
     }
 
+    /// Verifies if an image path belongs to the genuine game binary.
+    /// Specifically protects against malicious impersonation of `VALORANT-Win64-Shipping.exe`.
+    pub fn is_legitimate_game_path(target_binary: &str, image_path: &str) -> bool {
+        if target_binary.eq_ignore_ascii_case(VALORANT_BINARY_NAME) {
+            let lower = image_path.to_lowercase();
+            lower.ends_with(r"\shootergame\binaries\win64\valorant-win64-shipping.exe")
+                || (lower.contains("valorant") && lower.contains("shootergame") && lower.ends_with("valorant-win64-shipping.exe"))
+        } else {
+            true
+        }
+    }
+
     /// Search running processes for target executable name and return both PID and full image path.
+    /// Validates full executable image path for genuine game installations.
     pub fn find_process_with_path(name: &str) -> Option<(u32, String)> {
         let clean_target = name.to_lowercase();
         unsafe {
@@ -120,8 +133,12 @@ impl ProcessSupervisor {
                         if let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
                             let path = get_process_image_path(handle).unwrap_or_default();
                             let _ = CloseHandle(handle);
-                            found = Some((pid, path));
-                            break;
+                            if Self::is_legitimate_game_path(name, &path) {
+                                found = Some((pid, path));
+                                break;
+                            } else {
+                                warn!(pid = pid, path = %path, "Process matched target binary name but failed full path validation");
+                            }
                         }
                     }
 
@@ -222,7 +239,9 @@ impl ProcessSupervisor {
     }
 
     /// Supervise the active game process until exit. Consumes 0.0% CPU by using `WaitForSingleObject`.
-    pub fn wait_for_game_exit(&self, pid: u32) -> Result<(), String> {
+    /// Periodically verifies `stop_signal` (every 1000ms) to allow cancellation without leaks.
+    /// Returns `Ok(true)` if process exited normally, `Ok(false)` if cancelled by `stop_signal`.
+    pub fn wait_for_game_exit(&self, pid: u32, stop_signal: &Arc<AtomicBool>) -> Result<bool, String> {
         info!(pid = pid, "Entering low-overhead passive supervision state for game process");
         unsafe {
             let handle = OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_QUERY_INFORMATION, false, pid)
@@ -230,24 +249,29 @@ impl ProcessSupervisor {
 
             // Wait in 1000ms increments to allow cancellation checks while using 0% CPU
             loop {
+                if stop_signal.load(std::sync::atomic::Ordering::Relaxed) {
+                    info!(pid = pid, "Passive game supervision cancelled by stop signal");
+                    let _ = CloseHandle(handle);
+                    return Ok(false);
+                }
+
                 let wait = WaitForSingleObject(handle, 1000);
                 if wait.0 == 0 {
                     // Object signaled: Process exited!
                     info!(pid = pid, "Target game process terminated cleanly");
-                    break;
+                    let _ = CloseHandle(handle);
+                    return Ok(true);
                 }
 
                 let mut exit_code: u32 = 0;
                 let _ = GetExitCodeProcess(handle, &mut exit_code);
                 if exit_code != (STILL_ACTIVE.0 as u32) {
                     info!(pid = pid, exit_code = exit_code, "Target game process exited");
-                    break;
+                    let _ = CloseHandle(handle);
+                    return Ok(true);
                 }
             }
-
-            let _ = CloseHandle(handle);
         }
-        Ok(())
     }
 
     /// Spawn an asynchronous background watcher thread to supervise the game process lifecycle (`TASK-FUNC-02`).
@@ -293,8 +317,17 @@ impl ProcessSupervisor {
             }
 
             // 3. Passive wait state for game exit
-            if let Err(e) = supervisor.wait_for_game_exit(pid) {
-                warn!(pid = pid, error = %e, "Passive synchronization error during game supervision");
+            let clean_exit = match supervisor.wait_for_game_exit(pid, &stop_signal) {
+                Ok(status) => status,
+                Err(e) => {
+                    warn!(pid = pid, error = %e, "Passive synchronization error during game supervision");
+                    false
+                }
+            };
+
+            if !clean_exit || stop_signal.load(std::sync::atomic::Ordering::Relaxed) {
+                info!("Game supervision cancelled or stopped prematurely. Skipping post-match restoration.");
+                return;
             }
 
             // 4. Game has exited! Post-match cleanup and restoration
@@ -446,6 +479,72 @@ mod tests {
         let join_res = handle.join();
         assert!(join_res.is_ok(), "Supervisor thread must terminate cleanly after process exit");
         let _ = std::fs::remove_file(&test_exe);
+    }
+
+    #[test]
+    fn test_wait_for_game_exit_aborts_on_stop_signal() {
+        let test_name = "valopt_supervisor_test_cancel.exe";
+        let test_exe = get_unique_mock_target(test_name);
+
+        let child = std::process::Command::new(&test_exe)
+            .args(["/c", "ping -n 30 127.0.0.1 >nul"])
+            .spawn()
+            .expect("Failed to launch test mock process");
+        let pid = child.id();
+        std::thread::sleep(Duration::from_millis(150));
+
+        let config = GameSupervisorConfig {
+            target_binary: test_name.to_string(),
+            p_core_affinity_mask: None,
+            terminate_cef_ui: false,
+            poll_interval_ms: 100,
+        };
+        let supervisor = ProcessSupervisor::new(config);
+        let stop_signal = Arc::new(AtomicBool::new(false));
+
+        let stop_clone = stop_signal.clone();
+        let cancel_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1100));
+            stop_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+
+        let wait_start = std::time::Instant::now();
+        let clean_exit = supervisor.wait_for_game_exit(pid, &stop_signal).expect("Wait must succeed");
+        let wait_dur = wait_start.elapsed();
+
+        assert!(!clean_exit, "Must report cancellation (false) instead of normal exit");
+        assert!(wait_dur.as_millis() < 3000, "Must return shortly after stop_signal, elapsed: {:?}", wait_dur);
+
+        let _ = cancel_thread.join();
+        let _ = terminate_process_gracefully(pid, test_name, 1000);
+        let _ = std::fs::remove_file(&test_exe);
+    }
+
+    #[test]
+    fn test_spoofed_valorant_binary_rejected_by_path_validation() {
+        let temp_dir = std::env::temp_dir();
+        let spoofed_exe = temp_dir.join(VALORANT_BINARY_NAME);
+        let windir = std::env::var("windir").unwrap_or_else(|_| r"C:\Windows".to_string());
+        let src = std::path::PathBuf::from(windir).join("System32").join("cmd.exe");
+        let _ = std::fs::copy(&src, &spoofed_exe);
+
+        if spoofed_exe.is_file() {
+            let child = std::process::Command::new(&spoofed_exe)
+                .args(["/c", "ping -n 10 127.0.0.1 >nul"])
+                .spawn();
+
+            if let Ok(mut c) = child {
+                std::thread::sleep(Duration::from_millis(150));
+
+                // ProcessSupervisor MUST reject this binary because its path does not match ShooterGame shipping path
+                let detected = ProcessSupervisor::find_process_with_path(VALORANT_BINARY_NAME);
+                assert!(detected.is_none(), "Spoofed VALORANT binary in temp dir must be rejected by full path verification");
+
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+            let _ = std::fs::remove_file(&spoofed_exe);
+        }
     }
 }
 

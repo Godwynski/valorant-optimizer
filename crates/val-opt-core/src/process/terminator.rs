@@ -439,6 +439,12 @@ pub fn spawn_process_with_user_token(
             }
         }
 
+        let working_dir = exe_path.parent();
+        let mut wide_dir: Option<Vec<u16>> = working_dir.map(|d| {
+            d.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect()
+        });
+        let dir_pcwstr = wide_dir.as_mut().map(|w| windows::core::PCWSTR(w.as_ptr())).unwrap_or(windows::core::PCWSTR::null());
+
         let res = CreateProcessAsUserW(
             user_token,
             None,
@@ -448,7 +454,7 @@ pub fn spawn_process_with_user_token(
             false,
             creation_flags,
             if !env_ptr.is_null() { Some(env_ptr) } else { None },
-            None,
+            dir_pcwstr,
             &si,
             &mut pi,
         );
@@ -505,6 +511,9 @@ pub fn relaunch_single_application(app: &TerminatedAppBackup) -> Result<u32, Rel
 
         // Standard spawn for un-elevated process
         let mut cmd = std::process::Command::new(&valid_path);
+        if let Some(parent) = valid_path.parent() {
+            cmd.current_dir(parent);
+        }
         if let Some(ref args) = app.command_line {
             cmd.arg(args);
         }
