@@ -160,7 +160,7 @@ impl IpcServer {
 
             IpcRequest::GetLatencyReport { duration_secs } => {
                 let mut session = crate::latency::KernelLatencySessionManager::new();
-                session.run_synthetic_session(Duration::from_secs_f64(duration_secs), false);
+                let _ = session.run_real_session(Duration::from_secs_f64(duration_secs));
                 let report = crate::latency::report::generate_report(&session, duration_secs);
                 IpcResponse::LatencyReport(report)
             }
@@ -523,10 +523,11 @@ mod tests {
 
     #[test]
     fn test_ipc_handler_latency_report() {
-        let resp = IpcServer::handle_request(IpcRequest::GetLatencyReport { duration_secs: 0.1 });
+        let resp = IpcServer::handle_request(IpcRequest::GetLatencyReport { duration_secs: 0.05 });
         match resp {
             IpcResponse::LatencyReport(report) => {
-                assert!(report.total_dpcs_captured > 0);
+                assert_eq!(report.test_duration_secs, 0.05);
+                assert!(!report.provenance.collection_mechanism.is_empty());
             }
             _ => panic!("Expected LatencyReport response"),
         }

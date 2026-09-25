@@ -209,9 +209,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let config = ABBenchmarkConfig {
                 trials,
                 frames_per_trial: 1000,
+                trial_duration: std::time::Duration::from_secs(5),
                 warmup_frames: 50,
                 baseline_fps: 228.0,
                 optimized_fps: 254.0,
+                target_pid: None,
             };
 
             let runner = ABBenchmarkRunner::new(config);
@@ -361,7 +363,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let start = std::time::Instant::now();
 
             let mut session = val_opt_core::latency::KernelLatencySessionManager::new();
-            session.run_synthetic_session(std::time::Duration::from_secs_f64(duration_secs), false);
+            if let Err(e) = session.run_real_session(std::time::Duration::from_secs_f64(duration_secs)) {
+                eprintln!("[WARNING] Real kernel ETW latency session failed: {}", e);
+            }
 
             let elapsed = start.elapsed();
             let report = val_opt_core::latency::report::generate_report(&session, elapsed.as_secs_f64());

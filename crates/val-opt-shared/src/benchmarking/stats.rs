@@ -1,12 +1,22 @@
 //! Statistical computation engine for frame-time distribution, percentiles, and A/B Student's t-tests.
 
-use super::models::{ABComparisonReport, BenchmarkMetrics, FrameSample};
+use super::models::{ABComparisonReport, BenchmarkMetrics, EnvironmentalTelemetry, FrameSample, TelemetryProvenance};
 
 /// Compute complete benchmark metrics from a slice of frame telemetry samples.
 /// Optionally trims initial warmup frames to eliminate shader caching / level load hitching.
 pub fn compute_metrics(
     samples: &[FrameSample],
     warmup_frames: usize,
+) -> Result<BenchmarkMetrics, String> {
+    compute_metrics_with_provenance(samples, warmup_frames, TelemetryProvenance::default(), None)
+}
+
+/// Compute complete benchmark metrics including provenance metadata and environmental conditions.
+pub fn compute_metrics_with_provenance(
+    samples: &[FrameSample],
+    warmup_frames: usize,
+    provenance: TelemetryProvenance,
+    environment: Option<EnvironmentalTelemetry>,
 ) -> Result<BenchmarkMetrics, String> {
     if samples.len() <= warmup_frames {
         return Err(format!(
@@ -79,6 +89,8 @@ pub fn compute_metrics(
     let stutter_count_2_0x = frame_times.iter().filter(|&&t| t >= threshold_2_0x).count();
 
     Ok(BenchmarkMetrics {
+        provenance,
+        environment,
         total_frames,
         duration_seconds,
         avg_fps,
@@ -300,9 +312,13 @@ pub fn compare_ab_trials(
     let delta_pacing_std_dev_percent = ((optimized_pacing_std_dev - baseline_pacing_std_dev) / baseline_pacing_std_dev) * 100.0;
 
     let (t_statistic, degrees_of_freedom, p_value) = welch_t_test(&base_1p, &opt_1p)?;
+    let (mann_whitney_u_stat, mann_whitney_p_value) = mann_whitney_u_test(&base_1p, &opt_1p).unwrap_or((0.0, 1.0));
+    let bootstrap_one_percent_ci = bootstrap_percentile_delta_ci(&base_1p, &opt_1p, 2000, 0.95).unwrap_or((0.0, 0.0));
+    let (levene_f_stat, levene_p_value) = levene_variance_test(&base_pacing, &opt_pacing).unwrap_or((0.0, 1.0));
+    let is_variance_significantly_reduced = levene_p_value < 0.05 && optimized_pacing_std_dev < baseline_pacing_std_dev;
 
-    // Statistical significance criteria: p < 0.01 and delta > 3.0% (for 1% low or avg FPS)
-    let is_statistically_significant = p_value < 0.01;
+    // Both parametric and non-parametric tests considered for robust confirmation
+    let is_statistically_significant = p_value < 0.01 && mann_whitney_p_value < 0.05;
     let meets_threshold = is_statistically_significant && (delta_one_percent_low_percent >= 3.0 || delta_avg_fps_percent >= 3.0);
 
     let recommendation = if meets_threshold {
@@ -312,13 +328,18 @@ pub fn compare_ab_trials(
     } else if delta_one_percent_low_percent < -1.0 {
         "REJECTED — Optimization caused performance regression".to_string()
     } else {
-        "REJECTED (Placebo / Statistically Insignificant) — Failed p < 0.01 significance test".to_string()
+        "REJECTED (Placebo / Statistically Insignificant) — Failed significance test".to_string()
     };
+
+    let provenance = baseline_runs.first().map(|r| r.provenance.clone()).unwrap_or_default();
+    let environment = optimized_runs.last().and_then(|r| r.environment.clone()).or_else(|| baseline_runs.last().and_then(|r| r.environment.clone()));
 
     Ok(ABComparisonReport {
         baseline_label: "Stock Windows Baseline".to_string(),
         optimized_label: "Optimized Profile".to_string(),
         trials_count: n,
+        provenance,
+        environment,
         baseline_avg_fps,
         optimized_avg_fps,
         delta_avg_fps_percent,
@@ -334,10 +355,222 @@ pub fn compare_ab_trials(
         t_statistic,
         degrees_of_freedom,
         p_value,
+        mann_whitney_u_stat,
+        mann_whitney_p_value,
+        bootstrap_one_percent_ci,
+        levene_f_stat,
+        levene_p_value,
+        is_variance_significantly_reduced,
         is_statistically_significant,
         meets_threshold,
         recommendation,
     })
+}
+
+/// Standard normal cumulative distribution function Φ(x).
+pub fn standard_normal_cdf(x: f64) -> f64 {
+    // Abramowitz and Stegun formula 7.1.26 approximation for erf(x)
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let z = x.abs() / std::f64::consts::SQRT_2;
+    let p = 0.3275911;
+    let t = 1.0 / (1.0 + p * z);
+    let a1 = 0.254829592;
+    let a2 = -0.284496736;
+    let a3 = 1.421413741;
+    let a4 = -1.453152027;
+    let a5 = 1.061405429;
+    let poly = (((a5 * t + a4) * t + a3) * t + a2) * t + a1;
+    let erf_val = sign * (1.0 - poly * (-z * z).exp());
+    0.5 * (1.0 + erf_val)
+}
+
+/// Non-parametric Mann-Whitney U test (Wilcoxon rank-sum) for comparing two continuous
+/// non-normal distributions with tie handling and continuity correction.
+/// Returns (U_statistic, two_tailed_p_value).
+pub fn mann_whitney_u_test(sample_a: &[f64], sample_b: &[f64]) -> Result<(f64, f64), String> {
+    let n1 = sample_a.len();
+    let n2 = sample_b.len();
+
+    if n1 < 2 || n2 < 2 {
+        return Err(format!("Mann-Whitney U requires >= 2 samples per group, got {} and {}", n1, n2));
+    }
+
+    let n1_f = n1 as f64;
+    let n2_f = n2 as f64;
+    let n_total = n1 + n2;
+
+    // Combine samples with group labels: 0 for A, 1 for B
+    let mut combined: Vec<(f64, u8)> = Vec::with_capacity(n_total);
+    for &x in sample_a {
+        combined.push((x, 0));
+    }
+    for &x in sample_b {
+        combined.push((x, 1));
+    }
+
+    combined.sort_by(|(v1, _), (v2, _)| v1.partial_cmp(v2).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Assign mid-ranks to ties
+    let mut ranks = vec![0.0f64; n_total];
+    let mut tie_sum = 0.0f64;
+    let mut i = 0;
+
+    while i < n_total {
+        let mut j = i;
+        while j < n_total && (combined[j].0 - combined[i].0).abs() < 1e-12 {
+            j += 1;
+        }
+        let tie_count = (j - i) as f64;
+        let avg_rank = ((i + 1 + j) as f64) / 2.0;
+        for k in i..j {
+            ranks[k] = avg_rank;
+        }
+        if tie_count > 1.0 {
+            tie_sum += (tie_count.powi(3) - tie_count) / (n_total as f64 * (n_total as f64 - 1.0));
+        }
+        i = j;
+    }
+
+    let mut rank_sum_a = 0.0f64;
+    for (k, (_, group)) in combined.iter().enumerate() {
+        if *group == 0 {
+            rank_sum_a += ranks[k];
+        }
+    }
+
+    let u1 = n1_f * n2_f + (n1_f * (n1_f + 1.0)) / 2.0 - rank_sum_a;
+    let u2 = n1_f * n2_f - u1;
+    let u = u1.min(u2);
+
+    let mu_u = (n1_f * n2_f) / 2.0;
+    let var_u = (n1_f * n2_f / 12.0) * ((n_total as f64 + 1.0) - tie_sum);
+
+    if var_u <= 1e-12 {
+        let p = if (u - mu_u).abs() < 1e-12 { 1.0 } else { 0.0 };
+        return Ok((u, p));
+    }
+
+    let sigma_u = var_u.sqrt();
+    let z = if u < mu_u {
+        (u - mu_u + 0.5) / sigma_u
+    } else if u > mu_u {
+        (u - mu_u - 0.5) / sigma_u
+    } else {
+        0.0
+    };
+
+    let p_value = (2.0 * (1.0 - standard_normal_cdf(z.abs()))).clamp(0.0, 1.0);
+    Ok((u, p_value))
+}
+
+/// Compute 95% bootstrap confidence interval of percentage delta between sample populations.
+/// Uses deterministic pseudo-random sampling with replacement.
+pub fn bootstrap_percentile_delta_ci(
+    sample_a: &[f64],
+    sample_b: &[f64],
+    resamples: usize,
+    confidence_level: f64,
+) -> Result<(f64, f64), String> {
+    if sample_a.is_empty() || sample_b.is_empty() {
+        return Err("Cannot bootstrap with empty sample sets".to_string());
+    }
+
+    let mut deltas = Vec::with_capacity(resamples);
+    let mut rng_state: u64 = 0x9E3779B97F4A7C15;
+
+    // Xorshift64 PRNG for fast deterministic bootstrapping
+    let mut next_rand = || {
+        rng_state ^= rng_state << 13;
+        rng_state ^= rng_state >> 7;
+        rng_state ^= rng_state << 17;
+        rng_state
+    };
+
+    let n1 = sample_a.len();
+    let n2 = sample_b.len();
+
+    for _ in 0..resamples {
+        let mut sum_a = 0.0;
+        for _ in 0..n1 {
+            let idx = (next_rand() as usize) % n1;
+            sum_a += sample_a[idx];
+        }
+        let mean_a = sum_a / (n1 as f64);
+
+        let mut sum_b = 0.0;
+        for _ in 0..n2 {
+            let idx = (next_rand() as usize) % n2;
+            sum_b += sample_b[idx];
+        }
+        let mean_b = sum_b / (n2 as f64);
+
+        if mean_a > 0.0 {
+            let delta_pct = ((mean_b - mean_a) / mean_a) * 100.0;
+            deltas.push(delta_pct);
+        }
+    }
+
+    if deltas.is_empty() {
+        return Ok((0.0, 0.0));
+    }
+
+    deltas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let alpha = 1.0 - confidence_level;
+    let lower_pct = (alpha / 2.0) * 100.0;
+    let upper_pct = (1.0 - alpha / 2.0) * 100.0;
+
+    let lower = calculate_percentile(&deltas, lower_pct);
+    let upper = calculate_percentile(&deltas, upper_pct);
+
+    Ok((lower, upper))
+}
+
+/// Brown-Forsythe variant of Levene's test for equality of variances across two groups.
+/// Robust against non-normal, skewed frame-time distributions.
+/// Returns (F_statistic, p_value).
+pub fn levene_variance_test(sample_a: &[f64], sample_b: &[f64]) -> Result<(f64, f64), String> {
+    let n1 = sample_a.len();
+    let n2 = sample_b.len();
+
+    if n1 < 2 || n2 < 2 {
+        return Err(format!("Levene test requires >= 2 samples per group, got {} and {}", n1, n2));
+    }
+
+    let mut sorted_a = sample_a.to_vec();
+    let mut sorted_b = sample_b.to_vec();
+    sorted_a.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    sorted_b.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let med_a = calculate_percentile(&sorted_a, 50.0);
+    let med_b = calculate_percentile(&sorted_b, 50.0);
+
+    let z1: Vec<f64> = sample_a.iter().map(|&x| (x - med_a).abs()).collect();
+    let z2: Vec<f64> = sample_b.iter().map(|&x| (x - med_b).abs()).collect();
+
+    let mean_z1 = z1.iter().sum::<f64>() / (n1 as f64);
+    let mean_z2 = z2.iter().sum::<f64>() / (n2 as f64);
+    let overall_mean_z = (z1.iter().sum::<f64>() + z2.iter().sum::<f64>()) / ((n1 + n2) as f64);
+
+    let ss_between = (n1 as f64) * (mean_z1 - overall_mean_z).powi(2)
+        + (n2 as f64) * (mean_z2 - overall_mean_z).powi(2);
+
+    let ss_within: f64 = z1.iter().map(|&z| (z - mean_z1).powi(2)).sum::<f64>()
+        + z2.iter().map(|&z| (z - mean_z2).powi(2)).sum::<f64>();
+
+    let df_between = 1.0;
+    let df_within = (n1 + n2 - 2) as f64;
+
+    if ss_within <= 1e-12 {
+        let p = if ss_between < 1e-12 { 1.0 } else { 0.0 };
+        return Ok((0.0, p));
+    }
+
+    let f_stat = (ss_between / df_between) / (ss_within / df_within);
+    // For df1 = 1, F = t^2 with df2 degrees of freedom. p = I_{df2 / (df2 + F)}(df2/2, 1/2)
+    let p_value = compute_t_distribution_two_tailed_p(f_stat.sqrt(), df_within);
+
+    Ok((f_stat, p_value))
 }
 
 #[cfg(test)]
@@ -397,5 +630,44 @@ mod tests {
         assert!(t_stat > 10.0, "Expected large t-statistic, got {}", t_stat);
         assert!(df > 10.0, "Expected valid degrees of freedom, got {}", df);
         assert!(p_val < 0.0001, "Expected highly significant p-value, got {}", p_val);
+    }
+
+    #[test]
+    fn test_mann_whitney_u_test_accuracy() {
+        let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        let b = vec![11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0];
+
+        let (u_stat, p_val) = mann_whitney_u_test(&a, &b).expect("U-test must succeed");
+        assert_eq!(u_stat, 0.0, "Complete separation must yield U = 0");
+        assert!(p_val < 0.001, "Expected highly significant p-value for separated groups, got {}", p_val);
+
+        // Identical groups
+        let (u_ident, p_ident) = mann_whitney_u_test(&a, &a).expect("U-test on identical groups");
+        assert_eq!(u_ident, 50.0);
+        assert!((p_ident - 1.0).abs() < 1e-4, "Expected p-value ~ 1.0 for identical groups, got {}", p_ident);
+    }
+
+    #[test]
+    fn test_bootstrap_confidence_interval() {
+        let a = vec![100.0, 102.0, 101.0, 99.0, 100.5, 101.5];
+        let b = vec![110.0, 112.0, 111.0, 109.0, 110.5, 111.5];
+
+        let (ci_low, ci_high) = bootstrap_percentile_delta_ci(&a, &b, 1000, 0.95).expect("Bootstrap must succeed");
+        // Mean A ~ 100.67, Mean B ~ 110.67, Delta ~ 9.93%
+        assert!(ci_low > 7.0, "Lower CI must show positive gain, got {}", ci_low);
+        assert!(ci_high < 13.0, "Upper CI must be bounded, got {}", ci_high);
+        assert!(ci_low < ci_high, "CI bounds must be ordered: {} < {}", ci_low, ci_high);
+    }
+
+    #[test]
+    fn test_levene_variance_test_accuracy() {
+        // Group A: High variance
+        let a = vec![10.0, 20.0, 5.0, 30.0, 2.0, 40.0, 8.0, 25.0, 15.0, 35.0];
+        // Group B: Low variance (consistent pacing)
+        let b = vec![19.5, 20.5, 20.0, 19.8, 20.2, 20.1, 19.9, 20.3, 19.7, 20.0];
+
+        let (f_stat, p_val) = levene_variance_test(&a, &b).expect("Levene test must succeed");
+        assert!(f_stat > 10.0, "Expected large F-statistic for variance difference, got {}", f_stat);
+        assert!(p_val < 0.01, "Expected significant p-value for variance reduction, got {}", p_val);
     }
 }

@@ -1,4 +1,32 @@
+use crate::benchmarking::models::TelemetryProvenance;
 use serde::{Deserialize, Serialize};
+
+/// Status and provenance classification for a DPC/ISR latency measurement.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LatencyMeasurementStatus {
+    /// Telemetry collected directly from genuine Windows NT Kernel Logger ETW stream.
+    RealEtwCollected,
+    /// Kernel ETW tracing requires administrator elevation which was not present.
+    UnsupportedElevationRequired,
+    /// NT Kernel Logger was already locked/active by an external system profiler or WPR.
+    UnsupportedSessionInUse,
+    /// An internal Win32 ETW session error occurred.
+    SessionError,
+    /// Synthetic fixture used strictly for offline testing / CI environments.
+    SyntheticTestFixture,
+}
+
+impl LatencyMeasurementStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RealEtwCollected => "REAL_ETW_COLLECTED",
+            Self::UnsupportedElevationRequired => "UNSUPPORTED_ELEVATION_REQUIRED",
+            Self::UnsupportedSessionInUse => "UNSUPPORTED_SESSION_IN_USE",
+            Self::SessionError => "SESSION_ERROR",
+            Self::SyntheticTestFixture => "SYNTHETIC_TEST_FIXTURE",
+        }
+    }
+}
 
 /// High-resolution DPC or ISR execution sample.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -67,6 +95,8 @@ pub struct LatencyWarningEvent {
 /// Comprehensive hardware & driver latency diagnostic report.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LatencyReport {
+    pub provenance: TelemetryProvenance,
+    pub status: LatencyMeasurementStatus,
     pub total_dpcs_captured: u64,
     pub total_isrs_captured: u64,
     pub highest_dpc_us: u64,

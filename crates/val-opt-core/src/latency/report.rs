@@ -8,7 +8,7 @@
 //! - DPC latency 500µs - 1000µs: Acceptable but at risk of micro-stutter during intense action.
 //! - DPC latency >= 1000µs: Unsuitable; drivers causing audible crackling or visual hitches.
 
-use val_opt_shared::models::latency::LatencyReport;
+use val_opt_shared::models::latency::{LatencyMeasurementStatus, LatencyReport};
 use super::etw_session::KernelLatencySessionManager;
 
 /// Evaluates latency session metrics and generates a structured LatencyReport.
@@ -23,52 +23,91 @@ pub fn generate_report(session: &KernelLatencySessionManager, duration_secs: f64
     let highest_dpc_driver = top_drivers.first().map(|d| d.driver_name.clone());
     let highest_isr_driver = top_drivers.get(1).map(|d| d.driver_name.clone()).or_else(|| highest_dpc_driver.clone());
 
-    let suitable = max_dpc < 1000;
+    let status = session.measurement_status();
+    let provenance = session.provenance();
+
+    let suitable = match status {
+        LatencyMeasurementStatus::RealEtwCollected => max_dpc < 1000,
+        LatencyMeasurementStatus::SyntheticTestFixture => max_dpc < 1000,
+        _ => false,
+    };
 
     let mut recommendations = Vec::new();
-    if max_dpc >= 1000 {
-        recommendations.push(
-            "CRITICAL: System DPC latency exceeds 1000µs. Severe micro-stutter and frame drop hazard during gameplay."
-                .to_string(),
-        );
-    } else if max_dpc >= 500 {
-        recommendations.push(
-            "WARNING: System DPC latency exceeds 500µs. Input processing may experience occasional micro-delays."
-                .to_string(),
-        );
-    } else {
-        recommendations.push(
-            "EXCELLENT: Maximum DPC latency is well under 500µs. System hardware and drivers are optimal for competitive gaming."
-                .to_string(),
-        );
+
+    // Check measurement status first
+    match status {
+        LatencyMeasurementStatus::UnsupportedElevationRequired => {
+            recommendations.push(
+                "ELEVATION REQUIRED: Windows NT Kernel Logger requires full Administrator privileges. Run application as Administrator to capture real-time driver DPC/ISR latencies."
+                    .to_string(),
+            );
+        }
+        LatencyMeasurementStatus::UnsupportedSessionInUse => {
+            recommendations.push(
+                "SESSION CONFLICT: Windows NT Kernel Logger is currently active in another session (e.g. Windows Performance Recorder or ETL logger). Stop concurrent kernel traces."
+                    .to_string(),
+            );
+        }
+        LatencyMeasurementStatus::SessionError => {
+            if let Some(detail) = session.status_detail() {
+                recommendations.push(format!("ETW ERROR: {}", detail));
+            } else {
+                recommendations.push("ETW ERROR: Failed to initialize Windows NT Kernel Logger session.".to_string());
+            }
+        }
+        LatencyMeasurementStatus::SyntheticTestFixture => {
+            recommendations.push("NOTE: Telemetry collected from offline synthetic test fixture. Not representative of live kernel hardware performance.".to_string());
+        }
+        LatencyMeasurementStatus::RealEtwCollected => {}
     }
 
-    for off in &offending_drivers {
-        let name_lower = off.driver_name.to_lowercase();
-        if name_lower.contains("ndis") || name_lower.contains("rt640") || name_lower.contains("e1d") {
-            recommendations.push(format!(
-                "Network driver '{}' spiked to {}µs: Ensure EEE and Flow Control are disabled via val-opt network module.",
-                off.driver_name, off.max_execution_us
-            ));
-        } else if name_lower.contains("nvlddmkm") || name_lower.contains("amdkmdag") {
-            recommendations.push(format!(
-                "GPU driver '{}' spiked to {}µs: Enable MSI (Message Signaled Interrupts) and set Power Management Mode to 'Prefer Maximum Performance'.",
-                off.driver_name, off.max_execution_us
-            ));
-        } else if name_lower.contains("audio") || name_lower.contains("hdaudbus") {
-            recommendations.push(format!(
-                "Audio driver '{}' spiked to {}µs: Disable audio DSP/APO enhancements using val-opt Phase 3 optimizer.",
-                off.driver_name, off.max_execution_us
-            ));
-        } else if name_lower.contains("acpi") || name_lower.contains("wdf01000") {
-            recommendations.push(format!(
-                "Power management driver '{}' spiked to {}µs: Review BIOS CPU C-States and USB power savings.",
-                off.driver_name, off.max_execution_us
-            ));
+    if status == LatencyMeasurementStatus::RealEtwCollected || status == LatencyMeasurementStatus::SyntheticTestFixture {
+        if max_dpc >= 1000 {
+            recommendations.push(
+                "CRITICAL: System DPC latency exceeds 1000µs. Severe micro-stutter and frame drop hazard during gameplay."
+                    .to_string(),
+            );
+        } else if max_dpc >= 500 {
+            recommendations.push(
+                "WARNING: System DPC latency exceeds 500µs. Input processing may experience occasional micro-delays."
+                    .to_string(),
+            );
+        } else if session.total_dpcs() > 0 {
+            recommendations.push(
+                "EXCELLENT: Maximum DPC latency is well under 500µs. System hardware and drivers are optimal for competitive gaming."
+                    .to_string(),
+            );
+        }
+
+        for off in &offending_drivers {
+            let name_lower = off.driver_name.to_lowercase();
+            if name_lower.contains("ndis") || name_lower.contains("rt640") || name_lower.contains("e1d") {
+                recommendations.push(format!(
+                    "Network driver '{}' spiked to {}µs: Ensure EEE and Flow Control are disabled via val-opt network module.",
+                    off.driver_name, off.max_execution_us
+                ));
+            } else if name_lower.contains("nvlddmkm") || name_lower.contains("amdkmdag") {
+                recommendations.push(format!(
+                    "GPU driver '{}' spiked to {}µs: Enable MSI (Message Signaled Interrupts) and set Power Management Mode to 'Prefer Maximum Performance'.",
+                    off.driver_name, off.max_execution_us
+                ));
+            } else if name_lower.contains("audio") || name_lower.contains("hdaudbus") {
+                recommendations.push(format!(
+                    "Audio driver '{}' spiked to {}µs: Disable audio DSP/APO enhancements using val-opt Phase 3 optimizer.",
+                    off.driver_name, off.max_execution_us
+                ));
+            } else if name_lower.contains("acpi") || name_lower.contains("wdf01000") {
+                recommendations.push(format!(
+                    "Power management driver '{}' spiked to {}µs: Review BIOS CPU C-States and USB power savings.",
+                    off.driver_name, off.max_execution_us
+                ));
+            }
         }
     }
 
     LatencyReport {
+        provenance,
+        status,
         total_dpcs_captured: session.total_dpcs(),
         total_isrs_captured: session.total_isrs(),
         highest_dpc_us: max_dpc,
@@ -88,6 +127,9 @@ pub fn format_markdown_report(report: &LatencyReport) -> String {
     let mut md = String::new();
 
     md.push_str("# Hardware & Driver Latency Health Diagnostic Report\n\n");
+    md.push_str(&format!("- **Telemetry Source:** `{:?}`\n", report.provenance.source));
+    md.push_str(&format!("- **Measurement Status:** `{}`\n", report.status.as_str()));
+    md.push_str(&format!("- **Collection Mechanism:** {}\n", report.provenance.collection_mechanism));
     md.push_str(&format!("- **Test Duration:** {:.2} seconds\n", report.test_duration_secs));
     md.push_str(&format!("- **Total DPCs Captured:** {}\n", report.total_dpcs_captured));
     md.push_str(&format!("- **Total ISRs Captured:** {}\n", report.total_isrs_captured));
@@ -106,7 +148,7 @@ pub fn format_markdown_report(report: &LatencyReport) -> String {
         if report.system_suitable_for_competitive {
             "PASS (Suitable for Low-Latency Gaming)"
         } else {
-            "FAIL (Hazardous DPC Spikes Detected)"
+            "FAIL (Hazardous DPC Spikes Detected or Telemetry Unavailable)"
         }
     ));
 
@@ -150,6 +192,7 @@ mod tests {
         session.run_synthetic_session(Duration::from_millis(150), true);
 
         let report = generate_report(&session, 0.15);
+        assert_eq!(report.status, LatencyMeasurementStatus::SyntheticTestFixture);
         assert!(report.total_dpcs_captured > 0);
         assert!(report.highest_dpc_us >= 1000);
         assert!(!report.offending_drivers.is_empty());
@@ -158,5 +201,6 @@ mod tests {
         println!("{}", markdown);
         assert!(markdown.contains("Hardware & Driver Latency Health Diagnostic Report"));
         assert!(markdown.contains("Top Kernel Drivers by Highest DPC/ISR Execution Time"));
+        assert!(markdown.contains("SYNTHETIC_TEST_FIXTURE"));
     }
 }
