@@ -37,14 +37,13 @@ impl IpcServer {
 
     /// Process an IPC request verifying caller elevation status for sensitive operations (TASK-SEC-03).
     pub fn handle_request_authorized(request: IpcRequest, is_client_elevated: bool) -> IpcResponse {
-        // High-privilege requests require elevation
+        // High-privilege requests require elevation (TASK-SEC-03)
         let is_privileged = matches!(
             request,
             IpcRequest::ApplyOptimizations
                 | IpcRequest::RollbackOptimizations
                 | IpcRequest::PurgeBloatware
                 | IpcRequest::ShutdownDaemon
-                | IpcRequest::LaunchOptimizedGame { .. }
                 | IpcRequest::TrimWorkingSet
         );
 
@@ -275,11 +274,44 @@ impl IpcServer {
     /// Verifies if the connected named pipe client process has administrative elevation (TASK-SEC-03).
     #[cfg(windows)]
     pub fn is_client_elevated(pipe_handle: windows::Win32::Foundation::HANDLE) -> bool {
+        use windows::Win32::Foundation::CloseHandle;
         use windows::Win32::Security::{GetTokenInformation, RevertToSelf, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+        use windows::Win32::System::Pipes::{GetNamedPipeClientProcessId, ImpersonateNamedPipeClient};
+        use windows::Win32::System::Threading::{
+            GetCurrentThread, OpenProcess, OpenProcessToken, OpenThreadToken, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
 
-        use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
-        use windows::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
+        // Primary: Query client process ID and its token elevation directly.
+        // This is deterministic and independent of client-side impersonation QOS flags.
+        let mut client_pid: u32 = 0;
+        unsafe {
+            if GetNamedPipeClientProcessId(pipe_handle, &mut client_pid).is_ok() && client_pid != 0 {
+                if let Ok(proc_handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, client_pid) {
+                    let mut proc_token = windows::Win32::Foundation::HANDLE::default();
+                    let token_ok = OpenProcessToken(proc_handle, TOKEN_QUERY, &mut proc_token).is_ok();
+                    let _ = CloseHandle(proc_handle);
 
+                    if token_ok {
+                        let mut elevation = TOKEN_ELEVATION::default();
+                        let mut return_length = 0u32;
+                        let elev_ok = GetTokenInformation(
+                            proc_token,
+                            TokenElevation,
+                            Some(&mut elevation as *mut _ as *mut _),
+                            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+                            &mut return_length,
+                        ).is_ok();
+                        let _ = CloseHandle(proc_token);
+
+                        if elev_ok {
+                            return elevation.TokenIsElevated != 0;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: Attempt thread impersonation token inspection
         unsafe {
             if ImpersonateNamedPipeClient(pipe_handle).is_ok() {
                 let mut thread_token = windows::Win32::Foundation::HANDLE::default();
@@ -297,7 +329,7 @@ impl IpcServer {
                     ).is_ok() {
                         is_elevated = elevation.TokenIsElevated != 0;
                     }
-                    let _ = windows::Win32::Foundation::CloseHandle(thread_token);
+                    let _ = CloseHandle(thread_token);
                 }
 
                 let _ = RevertToSelf();
@@ -530,13 +562,12 @@ mod tests {
 
     #[test]
     fn test_unauthorized_client_rejection_for_privileged_requests() {
-        // Privileged requests must be rejected when client is not elevated
+        // Privileged requests must be rejected when client is not elevated (TASK-SEC-03)
         let reqs = vec![
             IpcRequest::ApplyOptimizations,
             IpcRequest::RollbackOptimizations,
             IpcRequest::PurgeBloatware,
             IpcRequest::ShutdownDaemon,
-            IpcRequest::LaunchOptimizedGame { auto_relaunch_gui: false },
             IpcRequest::TrimWorkingSet,
         ];
 
@@ -550,9 +581,17 @@ mod tests {
             }
         }
 
-        // Non-privileged requests must succeed even for non-elevated clients
+        // Non-privileged requests must succeed without UNAUTHORIZED even for non-elevated clients
         let ping_resp = IpcServer::handle_request_authorized(IpcRequest::Ping, false);
         assert_eq!(ping_resp, IpcResponse::Pong);
+
+        let launch_resp = IpcServer::handle_request_authorized(
+            IpcRequest::LaunchOptimizedGame { auto_relaunch_gui: false },
+            false,
+        );
+        if let IpcResponse::Error { ref code, .. } = launch_resp {
+            assert_ne!(code, "UNAUTHORIZED", "LaunchOptimizedGame must not require client elevation");
+        }
     }
 
     #[test]

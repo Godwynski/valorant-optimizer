@@ -15,12 +15,17 @@ impl IpcClient {
     pub fn is_daemon_running() -> bool {
         #[cfg(windows)]
         {
-            use std::fs::OpenOptions;
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(VAL_OPT_PIPE_NAME)
-                .is_ok()
+            use windows::core::HSTRING;
+            use windows::Win32::Foundation::{ERROR_PIPE_BUSY, GetLastError};
+            use windows::Win32::System::Pipes::WaitNamedPipeW;
+
+            let pipe_name = HSTRING::from(VAL_OPT_PIPE_NAME);
+            let ok = unsafe { WaitNamedPipeW(&pipe_name, 50).as_bool() };
+            if ok {
+                true
+            } else {
+                unsafe { GetLastError() == ERROR_PIPE_BUSY }
+            }
         }
         #[cfg(not(windows))]
         {
@@ -80,11 +85,16 @@ impl IpcClient {
         #[cfg(windows)]
         {
             use std::fs::OpenOptions;
+            use std::os::windows::fs::OpenOptionsExt;
 
-            // Connect to named pipe with write/read access
+            // Security QoS flags: SECURITY_SQOS_PRESENT (0x00100000) | SECURITY_IMPERSONATION (0x00020000)
+            const SECURITY_IMPERSONATION_FLAGS: u32 = 0x00100000 | 0x00020000;
+
+            // Connect to named pipe with write/read access and impersonation QOS
             let mut pipe_res = OpenOptions::new()
                 .read(true)
                 .write(true)
+                .custom_flags(SECURITY_IMPERSONATION_FLAGS)
                 .open(VAL_OPT_PIPE_NAME);
 
             // If connection failed, attempt to auto-spawn the background daemon once
@@ -93,6 +103,7 @@ impl IpcClient {
                     pipe_res = OpenOptions::new()
                         .read(true)
                         .write(true)
+                        .custom_flags(SECURITY_IMPERSONATION_FLAGS)
                         .open(VAL_OPT_PIPE_NAME);
                 }
             }
