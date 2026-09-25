@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn test_crash_recovery_from_orphaned_snapshot() {
-        let temp_dir = std::env::temp_dir().join("val_opt_test_recovery");
+        let temp_dir = std::env::temp_dir().join(format!("val_opt_test_recovery_{}", std::process::id()));
         let _ = fs::create_dir_all(&temp_dir);
         let snap_file = temp_dir.join("orphaned_snapshot.json");
         let log_file = temp_dir.join("test_recovery.log");

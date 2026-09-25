@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 use val_opt_shared::ipc::{decode_message, encode_message, IpcRequest, IpcResponse, VAL_OPT_PIPE_NAME};
 
 /// The unified IPC server hosting the Windows Named Pipe.
@@ -42,6 +42,7 @@ impl IpcServer {
                 | IpcRequest::PurgeBloatware
                 | IpcRequest::ShutdownDaemon
                 | IpcRequest::LaunchOptimizedGame { .. }
+                | IpcRequest::TrimWorkingSet
         );
 
         if is_privileged && !is_client_elevated {
@@ -280,45 +281,48 @@ impl IpcServer {
                     warn!("Failed to initialize hardened pipe security attributes: {}", e);
                 }
 
-                let mut is_first = true;
+                // Explicitly enforce FIRST_PIPE_INSTANCE to prevent pipe squatting
+                let pipe_handle = unsafe {
+                    CreateNamedPipeW(
+                        &pipe_name,
+                        PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                        PIPE_UNLIMITED_INSTANCES,
+                        65536,
+                        65536,
+                        50,
+                        sa_res.as_ref().ok().map(|(sa, _)| sa as *const _),
+                    )
+                };
+
+                if pipe_handle == INVALID_HANDLE_VALUE {
+                    warn!("Failed to create first instance of named pipe (potential pipe squatting or already active instance). IPC server aborted.");
+                    return;
+                }
 
                 while running.load(Ordering::SeqCst) {
-                    let open_mode = if is_first {
-                        PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE
+                    // Wait for client connection
+                    let connect_res = unsafe { ConnectNamedPipe(pipe_handle, None) };
+                    let is_connected = if connect_res.is_ok() {
+                        true
                     } else {
-                        PIPE_ACCESS_DUPLEX
-                    };
-
-                    let pipe_handle = unsafe {
-                        CreateNamedPipeW(
-                            &pipe_name,
-                            open_mode,
-                            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                            PIPE_UNLIMITED_INSTANCES,
-                            65536,
-                            65536,
-                            50,
-                            sa_res.as_ref().ok().map(|(sa, _)| sa as *const _),
-                        )
-                    };
-
-                    if pipe_handle == INVALID_HANDLE_VALUE {
-                        if is_first {
-                            warn!("Failed to create first instance of named pipe (potential pipe squatting or already active instance). Retrying in 500ms");
-                        } else {
-                            debug!("CreateNamedPipeW returned invalid handle; retrying in 500ms");
+                        unsafe {
+                            windows::Win32::Foundation::GetLastError()
+                                == windows::Win32::Foundation::ERROR_PIPE_CONNECTED
                         }
-                        thread::sleep(Duration::from_millis(500));
+                    };
+
+                    if !is_connected {
+                        if !running.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(50));
                         continue;
                     }
 
-                    is_first = false;
-
-                    // Wait for client connection
-                    let connected = unsafe { ConnectNamedPipe(pipe_handle, None) };
-                    if connected.is_err() && !running.load(Ordering::SeqCst) {
+                    if !running.load(Ordering::SeqCst) {
                         unsafe {
-                            let _ = windows::Win32::Foundation::CloseHandle(pipe_handle);
+                            let _ = DisconnectNamedPipe(pipe_handle);
                         }
                         break;
                     }
@@ -326,30 +330,50 @@ impl IpcServer {
                     // Check client elevation level
                     let is_elevated = Self::is_client_elevated(pipe_handle);
 
-                    // Convert raw handle to std::fs::File for standard BufReader/BufWriter usage
-                    let mut file = unsafe { std::fs::File::from_raw_handle(pipe_handle.0 as *mut _) };
-                    let mut reader = BufReader::new(file.try_clone().unwrap());
+                    // Duplicate pipe handle so std::fs::File takes ownership only of the duplicate,
+                    // preserving pipe_handle and preventing race windows/squatting between requests.
+                    use windows::Win32::Foundation::{DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE};
+                    use windows::Win32::System::Threading::GetCurrentProcess;
 
-                    let mut line = String::new();
-                    if let Ok(bytes_read) = reader.read_line(&mut line) {
-                        if bytes_read > 0 {
-                            let req_res: Result<IpcRequest, _> = decode_message(line.as_bytes());
-                            let is_shutdown = matches!(req_res, Ok(IpcRequest::ShutdownDaemon));
-                            let resp = match req_res {
-                                Ok(req) => Self::handle_request_authorized(req, is_elevated),
-                                Err(e) => IpcResponse::Error {
-                                    code: "INVALID_REQUEST".to_string(),
-                                    message: e,
-                                },
-                            };
+                    let mut dup_handle = HANDLE::default();
+                    let dup_ok = unsafe {
+                        DuplicateHandle(
+                            GetCurrentProcess(),
+                            pipe_handle,
+                            GetCurrentProcess(),
+                            &mut dup_handle,
+                            0,
+                            false,
+                            DUPLICATE_SAME_ACCESS,
+                        )
+                        .is_ok()
+                    };
 
-                            if let Ok(encoded_resp) = encode_message(&resp) {
-                                let _ = file.write_all(&encoded_resp);
-                                let _ = file.flush();
-                            }
+                    if dup_ok {
+                        let mut file = unsafe { std::fs::File::from_raw_handle(dup_handle.0 as *mut _) };
+                        let mut reader = BufReader::new(file.try_clone().unwrap());
 
-                            if is_shutdown && is_elevated {
-                                running.store(false, Ordering::SeqCst);
+                        let mut line = String::new();
+                        if let Ok(bytes_read) = reader.read_line(&mut line) {
+                            if bytes_read > 0 {
+                                let req_res: Result<IpcRequest, _> = decode_message(line.as_bytes());
+                                let is_shutdown = matches!(req_res, Ok(IpcRequest::ShutdownDaemon));
+                                let resp = match req_res {
+                                    Ok(req) => Self::handle_request_authorized(req, is_elevated),
+                                    Err(e) => IpcResponse::Error {
+                                        code: "INVALID_REQUEST".to_string(),
+                                        message: e,
+                                    },
+                                };
+
+                                if let Ok(encoded_resp) = encode_message(&resp) {
+                                    let _ = file.write_all(&encoded_resp);
+                                    let _ = file.flush();
+                                }
+
+                                if is_shutdown && is_elevated {
+                                    running.store(false, Ordering::SeqCst);
+                                }
                             }
                         }
                     }
@@ -357,6 +381,10 @@ impl IpcServer {
                     unsafe {
                         let _ = DisconnectNamedPipe(pipe_handle);
                     }
+                }
+
+                unsafe {
+                    let _ = windows::Win32::Foundation::CloseHandle(pipe_handle);
                 }
 
                 if let Ok((_, p_sd)) = sa_res {
@@ -393,6 +421,15 @@ impl IpcServer {
     /// Stop the IPC server.
     pub fn stop(&mut self) {
         self.is_running.store(false, Ordering::SeqCst);
+        #[cfg(windows)]
+        {
+            // Connect dummy client to unblock ConnectNamedPipe if waiting
+            use std::fs::OpenOptions;
+            let _ = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(VAL_OPT_PIPE_NAME);
+        }
     }
 }
 
@@ -444,6 +481,7 @@ mod tests {
             IpcRequest::PurgeBloatware,
             IpcRequest::ShutdownDaemon,
             IpcRequest::LaunchOptimizedGame { auto_relaunch_gui: false },
+            IpcRequest::TrimWorkingSet,
         ];
 
         for req in reqs {
@@ -553,6 +591,79 @@ mod tests {
             println!("Named Pipe IPC round-trip latency: {:?}", elapsed);
             // TC-P07-02: sub-2ms typical latency, verify < 50ms under debug test runner
             assert!(elapsed.as_millis() < 50, "IPC RTT took too long: {:?}", elapsed);
+        }
+
+        server.stop();
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_named_pipe_multi_request_consecutive_and_squatting_resilience() {
+        let mut server = IpcServer::new();
+        server.start().expect("Failed to start IPC server");
+        std::thread::sleep(Duration::from_millis(100));
+
+        use std::fs::OpenOptions;
+        use std::io::{BufRead, BufReader, Write};
+
+        // Client Request 1: Ping
+        {
+            let mut pipe = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(VAL_OPT_PIPE_NAME)
+                .expect("Client 1 must connect");
+            let encoded = encode_message(&IpcRequest::Ping).expect("encode ping");
+            pipe.write_all(&encoded).unwrap();
+            pipe.flush().unwrap();
+            let mut reader = BufReader::new(pipe);
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let resp: IpcResponse = decode_message(line.as_bytes()).unwrap();
+            assert_eq!(resp, IpcResponse::Pong);
+        }
+
+        // Adversarial check: attempt to squat the live pipe while server is listening
+        {
+            use windows::core::HSTRING;
+            use windows::Win32::Foundation::INVALID_HANDLE_VALUE;
+            use windows::Win32::Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX};
+            use windows::Win32::System::Pipes::{CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT};
+
+            let pipe_name = HSTRING::from(VAL_OPT_PIPE_NAME);
+            let squatted = unsafe {
+                CreateNamedPipeW(
+                    &pipe_name,
+                    PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                    PIPE_UNLIMITED_INSTANCES,
+                    65536,
+                    65536,
+                    50,
+                    None,
+                )
+            };
+            assert_eq!(squatted, INVALID_HANDLE_VALUE, "Pipe squatting while server is active MUST fail");
+        }
+
+        // Client Request 2: GetStatus on the same persistent server instance
+        {
+            let mut pipe = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(VAL_OPT_PIPE_NAME)
+                .expect("Client 2 must connect");
+            let encoded = encode_message(&IpcRequest::GetStatus).expect("encode status");
+            pipe.write_all(&encoded).unwrap();
+            pipe.flush().unwrap();
+            let mut reader = BufReader::new(pipe);
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let resp: IpcResponse = decode_message(line.as_bytes()).unwrap();
+            match resp {
+                IpcResponse::Status { is_optimized, .. } => assert!(is_optimized),
+                other => panic!("Expected Status, got: {:?}", other),
+            }
         }
 
         server.stop();
