@@ -88,11 +88,36 @@ Type: filesandordirs; Name: "{commonappdata}\ValorantOptimizer"
 Type: dirifempty; Name: "{app}"
 
 [Code]
-// Helper function to check if game is currently running during install/uninstall
-function InitializeUninstall(): Boolean;
+// Check for Microsoft Visual C++ 2015-2022 x64 Redistributable runtime
+function IsVCRuntimeInstalled(): Boolean;
+begin
+  // Check if vcruntime140.dll is present in the 64-bit System directory
+  Result := FileExists(ExpandConstant('{sys}\vcruntime140.dll'));
+end;
+
+function InitializeSetup(): Boolean;
 var
-  ResultCode: Integer;
+  Msg: String;
 begin
   Result := True;
-  // Verify system is ready for uninstallation
+  if not IsVCRuntimeInstalled() then
+  begin
+    if not WizardSilent() then
+    begin
+      Msg := 'Notice: Microsoft Visual C++ 2015-2022 x64 Redistributable was not detected on this system.' + #13#10 + #13#10 +
+             'VALORANT Performance Optimizer requires VCRUNTIME140.dll to run.' + #13#10 + #13#10 +
+             'You can download the official runtime from Microsoft at:' + #13#10 +
+             'https://aka.ms/vs/17/release/vc_redist.x64.exe' + #13#10 + #13#10 +
+             'Do you wish to continue with the installation anyway?';
+      if MsgBox(Msg, mbConfirmation, MB_YESNO) = IDNO then
+      begin
+        Result := False;
+      end;
+    end;
+  end;
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  Result := True;
 end;

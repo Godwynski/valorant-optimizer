@@ -17,11 +17,15 @@ Single source of truth for execution status, active phases, and project health.
 - **Audit Completion Date:** 2026-09-25
 - **Audit Verdict:** Previous claims of 10/10 phases (100%) and 38/38 tasks complete were **invalidated by forensic audit**. Critical security vulnerabilities, simulated benchmarks, unverified Vanguard claims, and dead code pathways were identified.
 - **Active Phase:** Phase P4 — Packaging, Signing, Installer, and Release Verification (COMPLETE - RELEASE CANDIDATE)
+- **P5 Status:** `NOT STARTED` (Full codebase & git history audit confirms 0 P5 tasks, 0 P5 commits, 0 P5 files)
 - **Completed Packaging & Release Gate (P4):**
-  1. [RESOLVED] Real Windows Inno Setup 6.4.1 installer generated (`installer/output/ValorantOptimizer_Setup_0.1.0.exe`, 6,531,128 bytes).
+  1. [RESOLVED] Real Windows Inno Setup 6.4.1 installer generated (`installer/output/ValorantOptimizer_Setup_0.1.0.exe`, 6,531,568 bytes) with proactive VC++ 2015-2022 runtime detection.
   2. [RESOLVED] Cryptographic release manifest generated (`SHA256SUMS.txt`) from actual on-disk compiled release binaries.
   3. [RESOLVED] Privilege model audited: Installer requires admin only for `%ProgramFiles%` and `%ProgramData%` ACL configuration; GUI executes as standard un-elevated user (`runasoriginaluser`).
-  4. [RESOLVED] Automatic pre-uninstall rollback hook verified (`val-opt-cli.exe rollback`); zero orphaned user/system data or wildcards.
+  4. [RESOLVED] Uninstaller safety audited in 3 tiers:
+     - Uninstall mechanism / static audit: `VERIFIED` (`[UninstallRun]` executes `val-opt-cli rollback` then `{sys}\taskkill.exe`; canonical path validation enforced)
+     - Local lifecycle simulation: `TEST-VERIFIED` (`tests/installer_lifecycle_test.ps1`)
+     - Real clean Windows VM uninstall: `UNVERIFIED` (hypervisor sandbox unavailable)
   5. [RESOLVED] State B Authenticode signing: Local development certificate infrastructure operational; production public release signing explicitly classified as `UNVERIFIED` pending commercial CA certificate.
   6. [RESOLVED] External scan de-fabrication: Fake "0/70" VirusTotal score removed; malware scan status explicitly classified as `UNVERIFIED`.
   7. [RESOLVED] Clean VM test protocol documented; live hypervisor execution explicitly classified as `UNVERIFIED`.
@@ -83,9 +87,9 @@ Single source of truth for execution status, active phases, and project health.
 ---
 
 ## 5. Next Immediate Action
-- Final Phase P4 Gate Audit review complete (`P4_RELEASE_AUDIT.md`).
-- Await user review and formal release candidate acceptance.
-- Do NOT begin any hypothetical P5. Project remediation cycle is finished.
+- Final Phase P4 Cleanup & P5 Freeze complete (`P4_FINAL_CLEANUP_AUDIT.md`).
+- Project gate status: `P4 GATE: RELEASE CANDIDATE`.
+- P5 status: `P5 STATUS: NOT STARTED`. Zero P5 implementation permitted; project remediation stops at P4.
 
 ---
 

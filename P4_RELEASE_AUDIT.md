@@ -30,7 +30,7 @@ All cryptographic hashes were generated directly from the compiled release artif
 
 | Artifact Name | Relative Path | Size (Bytes) | SHA-256 Digest | Status |
 |---|---|---|---|---|
-| **Inno Setup Installer** | [`installer/output/ValorantOptimizer_Setup_0.1.0.exe`](file:///c:/Users/Godwyn/Documents/Projects/valorant%20optimize/installer/output/ValorantOptimizer_Setup_0.1.0.exe) | 6,531,128 | `ccd41dfe5104eaf20724d84f0038684196c166f815f743f0c17bd35743797ee8` | **VERIFIED** |
+| **Inno Setup Installer** | [`installer/output/ValorantOptimizer_Setup_0.1.0.exe`](file:///c:/Users/Godwyn/Documents/Projects/valorant%20optimize/installer/output/ValorantOptimizer_Setup_0.1.0.exe) | 6,531,568 | `7e19a731cda6a5d5defbbbfc387b338c985c6556efdea34f4fdc9779aed12c8e` | **VERIFIED** |
 | **GUI Production Executable** | [`target/release/val-opt-gui.exe`](file:///c:/Users/Godwyn/Documents/Projects/valorant%20optimize/target/release/val-opt-gui.exe) | 11,457,168 | `8ce3351a6360207789c8b162f268c9dfe401d0014148db4a3232e2be29c6c729` | **VERIFIED** |
 | **Core Daemon Executable** | [`target/release/val-opt-core.exe`](file:///c:/Users/Godwyn/Documents/Projects/valorant%20optimize/target/release/val-opt-core.exe) | 1,417,360 | `8922148ac43ccd1fbac9dc969f2c7ea1d50b955ab90ff7caea008179bf02518c` | **VERIFIED** |
 | **CLI Support Executable** | [`target/release/val-opt-cli.exe`](file:///c:/Users/Godwyn/Documents/Projects/valorant%20optimize/target/release/val-opt-cli.exe) | 886,928 | `58f21b0a4cec1c3b0869a2ceb84a59e863c8a631dc04f5f23c42ea9cf608a967` | **VERIFIED** |
@@ -220,10 +220,12 @@ The following limitations are explicitly documented and remain active release co
 | **Workspace Compilation & Linkage** | **VERIFIED** | `cargo build --release --workspace` completed with zero errors on `x86_64-pc-windows-msvc`. |
 | **Binary Reproducibility** | **VERIFIED** | Successive cargo release builds generate bit-for-bit identical SHA-256 digests across all three binaries. |
 | **PE Security Hardening** | **VERIFIED** | ASLR, HighEntropyVA, DEP/NX, CFG, and CET validated via `verify_hardening.ps1`. |
-| **Inno Setup Installer Compilation** | **VERIFIED** | Inno Setup 6.4.1 compiled valid installer package `ValorantOptimizer_Setup_0.1.0.exe`. |
-| **Atomic System Rollback on Uninstall** | **VERIFIED** | Verified via `tests/installer_lifecycle_test.ps1` and `[UninstallRun]` configuration. |
+| **Inno Setup Installer Compilation** | **VERIFIED** | Inno Setup 6.4.1 compiled valid installer package `ValorantOptimizer_Setup_0.1.0.exe` with proactive VC++ runtime detection. |
+| **Uninstall mechanism / static audit** | **VERIFIED** | Verified via `setup.iss` `[UninstallRun]` configuration, canonical path enforcement, and explicit `{sys}\taskkill.exe`. |
+| **Local lifecycle simulation** | **TEST-VERIFIED** | Verified via `tests/installer_lifecycle_test.ps1`. |
+| **Real clean Windows VM uninstall** | **UNVERIFIED** | Hypervisor sandbox unavailable in local automated build environment. |
 | **Hardened ProgramData ACLs** | **VERIFIED** | Verified via `setup.iss` directory permissions and `scripts/audit_programdata_acl.ps1`. |
-| **Runtime Dependency Tree** | **VERIFIED** | Verified via `dumpbin /imports` and native Windows DLL inventory. |
+| **Runtime Dependency Tree** | **VERIFIED** | Verified via `dumpbin /imports`: inbox DLLs + `VCRUNTIME140.dll` + `ucrtbase.dll`. Proactive detection in installer. |
 | **Workspace Regression Suite** | **VERIFIED** | 140 passed, 0 failed, 0 ignored. |
 | **Commercial Authenticode Signing** | **UNVERIFIED** | State B: Configured with local development certificate; requires commercial CA certificate. |
 | **Live Clean Windows VM Testing** | **UNVERIFIED** | Procedure documented; no hypervisor available in local automated build environment. |

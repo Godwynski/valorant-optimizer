@@ -49,7 +49,7 @@ Hashes were freshly recomputed from the live disk files. All values match [`SHA2
 | **`val-opt-gui.exe`** | [`target/release/val-opt-gui.exe`](file:///c:/Users/Godwyn/Documents/Projects/valorant%20optimize/target/release/val-opt-gui.exe) | 11,457,168 | `8ce3351a6360207789c8b162f268c9dfe401d0014148db4a3232e2be29c6c729` | **VERIFIED** |
 | **`val-opt-core.exe`** | [`target/release/val-opt-core.exe`](file:///c:/Users/Godwyn/Documents/Projects/valorant%20optimize/target/release/val-opt-core.exe) | 1,417,360 | `8922148ac43ccd1fbac9dc969f2c7ea1d50b955ab90ff7caea008179bf02518c` | **VERIFIED** |
 | **`val-opt-cli.exe`** | [`target/release/val-opt-cli.exe`](file:///c:/Users/Godwyn/Documents/Projects/valorant%20optimize/target/release/val-opt-cli.exe) | 886,928 | `58f21b0a4cec1c3b0869a2ceb84a59e863c8a631dc04f5f23c42ea9cf608a967` | **VERIFIED** |
-| **`ValorantOptimizer_Setup_0.1.0.exe`** | [`installer/output/ValorantOptimizer_Setup_0.1.0.exe`](file:///c:/Users/Godwyn/Documents/Projects/valorant%20optimize/installer/output/ValorantOptimizer_Setup_0.1.0.exe) | 6,531,128 | `ccd41dfe5104eaf20724d84f0038684196c166f815f743f0c17bd35743797ee8` | **VERIFIED** |
+| **`ValorantOptimizer_Setup_0.1.0.exe`** | [`installer/output/ValorantOptimizer_Setup_0.1.0.exe`](file:///c:/Users/Godwyn/Documents/Projects/valorant%20optimize/installer/output/ValorantOptimizer_Setup_0.1.0.exe) | 6,531,568 | `7e19a731cda6a5d5defbbbfc387b338c985c6556efdea34f4fdc9779aed12c8e` | **VERIFIED** |
 
 ---
 
@@ -240,9 +240,11 @@ cargo test --workspace
 | **Reproducibility** | Rust release binaries match bit-for-bit | **VERIFIED** | Successive builds produce identical SHA-256 hashes for all 3 binaries. | Inno Setup wrapper varies due to PE header timestamp. |
 | **PE Hardening** | Mitigations active (ASLR, DEP, CFG, CET) | **VERIFIED** | Verified via `scripts/verify_hardening.ps1` with 0 failures. | Standard Windows x64 mitigation set. |
 | **Dependency Audit** | Runtime dependencies identified | **VERIFIED** | Verified via `dumpbin /imports`: inbox DLLs + `VCRUNTIME140.dll` + `ucrtbase.dll`. | `VCRUNTIME140.dll` not bundled; requires VC++ redistributable. |
-| **Installer** | Inno Setup 6.4.1 package built | **VERIFIED** | `ValorantOptimizer_Setup_0.1.0.exe` generated on disk (6,531,128 bytes). | Self-signed wrapper. |
+| **Installer** | Inno Setup 6.4.1 package built | **VERIFIED** | `ValorantOptimizer_Setup_0.1.0.exe` generated on disk (6,531,568 bytes) with proactive VC++ runtime detection. | Self-signed wrapper. |
 | **Privilege Model** | GUI does not remain elevated | **VERIFIED** | `setup.iss` enforces `runasoriginaluser` flag on GUI launch. | Installer requires admin to place files in Program Files. |
-| **Uninstall Safety** | Uninstaller restores system before delete | **VERIFIED** | Script verified: invokes `val-opt-cli.exe rollback` then `{sys}\taskkill.exe`. | Live clean VM uninstall unverified. |
+| **Uninstall mechanism / static audit** | Uninstaller script safety & rollback | **VERIFIED** | Script verified: invokes `val-opt-cli.exe rollback` then `{sys}\taskkill.exe`. Canonical path validation enforced. | None (static constraint). |
+| **Local lifecycle simulation** | Isolated deployment and removal | **TEST-VERIFIED** | Verified via `tests/installer_lifecycle_test.ps1`. | Simulation in isolated directory. |
+| **Real clean Windows VM uninstall** | Bare-metal Windows 11 uninstall | **UNVERIFIED** | Procedure documented; no hypervisor available on build host. | Cannot test without bare-metal/virtual clean machine. |
 | **Clean VM** | Bare-metal Windows 11 installation | **UNVERIFIED** | Procedure documented; no hypervisor available on build host. | Cannot test without physical/virtual clean machine. |
 | **Upgrade Behavior** | In-place version upgrades | **TEST-VERIFIED** | Verified via static Inno Setup AppId configuration and simulation. | Live multi-version VM upgrade unverified. |
 | **Authenticode** | Commercial code signing | **UNVERIFIED** | State B: Local self-signed dev certificate only. | Commercial public CA certificate required. |
