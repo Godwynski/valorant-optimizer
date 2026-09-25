@@ -1,12 +1,13 @@
-//! Live VALORANT Match & Vanguard Integrity Verification (`TASK-P09-003`).
+//! Out-of-Process Non-Injection Safety Boundaries & Vanguard Pre-Flight Checks (`TASK-P09-003`).
 //!
-//! Validates 100% compliance with Riot Vanguard anti-cheat security policies
-//! across 100+ simulated and live competitive match cycles:
+//! NOTE: Project preflight and non-injection safety properties are test-verified.
+//! Vanguard acceptance during a live match remains UNVERIFIED.
+//!
+//! Verifies architectural constraints:
 //! 1. Zero forbidden APIs (no DLL injection, no memory reading/writing of game process).
 //! 2. Zero Realtime priority escalation (priority ceiling strictly enforced at `HIGH_PRIORITY_CLASS`).
 //! 3. Zero tampering with Windows security foundations (VBS/HVCI and Secure Boot preserved).
-//! 4. Zero Vanguard crash/error codes (`VAN 9005`, `VAN 1067`, `VAN 84`).
-//! 5. 100-match audit simulation verifying zero account flags or anti-cheat conflicts.
+//! 4. Zero termination or modification of Vanguard processes (`vgc.exe`, `vgk.sys`).
 
 use val_opt_core::process::safety_db::ProcessSafetyDb;
 use val_opt_core::safety::vanguard_check::VanguardChecker;
@@ -98,5 +99,5 @@ fn test_simulated_100_match_vanguard_audit_session() {
     }
 
     assert_eq!(audit_log.len(), 100);
-    println!("100/100 simulated competitive match sessions completed with ZERO Vanguard conflicts.");
+    println!("100/100 simulated architectural checks passed. (Note: Project preflight and non-injection safety properties are test-verified. Vanguard acceptance during a live match remains UNVERIFIED).");
 }

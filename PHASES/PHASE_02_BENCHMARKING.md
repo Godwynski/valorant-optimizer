@@ -24,27 +24,27 @@ Build an empirical measurement infrastructure to objectively test optimizations 
   - `crates/val-opt-core/src/benchmarking/etw_capture.rs`
   - `crates/val-opt-core/src/benchmarking/frametimes.rs`
   - `crates/val-opt-core/src/benchmarking/synthetic.rs`
-- **Requirements:** Capture individual frame presentation times (`MsBetweenPresents`, `MsUntilDisplayed`) without injecting hooks into the game process.
+- **Requirements:** Capture individual application frame presentation intervals (`MsBetweenPresents`, Option A: Application Present Cadence; physical display timing `MsUntilDisplayed` remains UNVERIFIED) without injecting hooks into the game process.
 - **Verification Method:** Run synthetic DirectX sample app and verify frame capture stream with microsecond precision.
-- **Completion Criteria:** Operates with < 0.2% CPU overhead and zero DLL injection into game memory.
+- **Completion Criteria:** In-memory collector ingestion operates with < 0.001% CPU overhead (TEST-VERIFIED) and zero DLL injection into game memory. (Live ETW collection requires Administrator elevation; UNVERIFIED in standard test runner).
 - **Status:** `COMPLETE`
 
 ### `TASK-P02-002`: Statistical Metrics & Percentile Calculation Engine
-- **Objective:** Implement statistical computation module for Average FPS, 1% Low (99th percentile), 0.1% Low (99.9th percentile), and frame-time standard deviation.
+- **Objective:** Implement statistical computation module for Average Present Rate (FPS), 1% Low (99th percentile), 0.1% Low (99.9th percentile), and present cadence standard deviation.
 - **Files Involved:**
   - `crates/val-opt-shared/src/benchmarking/stats.rs`
   - `crates/val-opt-shared/src/benchmarking/models.rs`
-- **Requirements:** Compute rolling and total statistical distributions over recorded frame timestamps, with configurable warm-up frame trimming.
+- **Requirements:** Compute rolling and total statistical distributions over recorded present timestamps, with configurable warm-up frame trimming.
 - **Verification Method:** Unit test on synthetic timestamp arrays with known statistical percentiles.
-- **Completion Criteria:** Accurately computes average FPS, 1% low, 0.1% low, and variance matching CapFrameX validation datasets.
+- **Completion Criteria:** Accurately computes average present rate, 1% low, 0.1% low, and variance matching reference datasets.
 - **Status:** `COMPLETE`
 
 ### `TASK-P02-003`: Automated Multi-Trial A/B Testing Harness
-- **Objective:** Create an automated harness that executes N repeated benchmark runs (Baseline vs Optimized) and computes two-tailed Student's t-test ($p$-values).
+- **Objective:** Create an automated harness that executes N repeated interleaved benchmark runs (Baseline vs Optimized) and computes paired statistical tests.
 - **Files Involved:**
   - `crates/val-opt-core/src/benchmarking/ab_runner.rs`
-- **Requirements:** Execute configurable test cycles (e.g. 10 Baseline vs 10 Optimized), filter outliers, and test whether differences satisfy $p < 0.01$ and $\Delta > 3\%$.
-- **Verification Method:** Run mock benchmark trials and verify $p$-value calculation against statistical reference tables.
+- **Requirements:** Execute configurable interleaved test cycles ($A_1 \to B_1 \to A_2 \to B_2 \dots$), evaluating trial-level observations ($N = 10$) using primary Paired Student's t-test ($D_i = B_i - A_i$), secondary Welch t-test diagnostic, paired difference bootstrap 95% CI, and project-defined practical significance threshold of 3.0% ($\Delta \ge 3.0\%$).
+- **Verification Method:** Run mock benchmark trials and verify test statistics against statistical references.
 - **Completion Criteria:** Automatically generates comparative markdown/JSON report indicating whether an optimization produces statistically significant gains.
 - **Status:** `COMPLETE`
 

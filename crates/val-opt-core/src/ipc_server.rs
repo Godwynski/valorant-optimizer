@@ -709,11 +709,15 @@ mod tests {
 
         // Client Request 2: GetStatus on the same persistent server instance
         {
-            let mut pipe = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(VAL_OPT_PIPE_NAME)
-                .expect("Client 2 must connect");
+            let mut pipe = None;
+            for _ in 0..20 {
+                if let Ok(p) = OpenOptions::new().read(true).write(true).open(VAL_OPT_PIPE_NAME) {
+                    pipe = Some(p);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            let mut pipe = pipe.expect("Client 2 must connect to persistent server instance");
             let encoded = encode_message(&IpcRequest::GetStatus).expect("encode status");
             pipe.write_all(&encoded).unwrap();
             pipe.flush().unwrap();

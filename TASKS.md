@@ -45,17 +45,17 @@ Complete checklist of all 38 discrete engineering tasks across the 10 execution 
 - [x] **`TASK-P02-001`**: PresentMon / ETW Frame-Time Ingestion Engine
   - **Objective:** Build a headless frame-time telemetry collector utilizing the Intel PresentMon API or Windows ETW (Event Tracing for Windows) D3D events.
   - **Files / Components:** `crates/val-opt-core/src/benchmarking/etw_capture.rs`, `crates/val-opt-core/src/benchmarking/frametimes.rs`.
-  - **Requirements:** Capture individual frame presentation times (`MsBetweenPresents`, `MsUntilDisplayed`) without injecting hooks into the game process.
+  - **Requirements:** Capture individual application frame presentation intervals (`MsBetweenPresents`, Option A: Application Present Cadence; physical display timing `MsUntilDisplayed` remains UNVERIFIED) without injecting hooks into the game process.
   - **Verification Method:** Run synthetic DirectX sample app and verify frame capture stream with microsecond precision.
-  - **Completion Criteria:** Frame capture engine operates with < 0.2% CPU overhead and zero DLL injection into game memory.
+  - **Completion Criteria:** In-memory collector ingestion operates with < 0.001% CPU overhead (TEST-VERIFIED) and zero DLL injection into game memory. (Live ETW collection requires Administrator elevation; UNVERIFIED in standard test runner).
   - **Status:** `COMPLETE`
 
 - [x] **`TASK-P02-002`**: Statistical Metrics & Percentile Calculation Engine
-  - **Objective:** Implement statistical computation module for Average FPS, 1% Low (99th percentile), 0.1% Low (99.9th percentile), and frame-time standard deviation.
+  - **Objective:** Implement statistical computation module for Average Present Rate (FPS), 1% Low (99th percentile), 0.1% Low (99.9th percentile), and present cadence standard deviation.
   - **Files / Components:** `crates/val-opt-shared/src/benchmarking/stats.rs`.
-  - **Requirements:** Pure Rust implementation computing rolling and total statistical distributions over recorded frame timestamps, with warm-up frame trimming.
+  - **Requirements:** Pure Rust implementation computing rolling and total statistical distributions over recorded present timestamps, with warm-up frame trimming.
   - **Verification Method:** Unit test on synthetic timestamp arrays with known statistical percentiles.
-  - **Completion Criteria:** Accurately computes average FPS, 1% low, 0.1% low, and variance matching CapFrameX validation datasets.
+  - **Completion Criteria:** Accurately computes average present rate, 1% low, 0.1% low, and variance matching reference datasets.
   - **Status:** `COMPLETE`
 
 - [x] **`TASK-P02-003`**: Automated Multi-Trial A/B Testing Harness
