@@ -38,10 +38,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!("Profile successfully committed to system");
                 if let Some(app) = app_weak.upgrade() {
                     app.set_dpc_status("OPTIMAL (< 80µs)".into());
+                    app.set_test_status_msg("Profile successfully committed to system.".into());
+                }
+            }
+            Ok(IpcResponse::Error { code, message }) => {
+                warn!("Failed to apply optimizations [{}]: {}", code, message);
+                if let Some(app) = app_weak.upgrade() {
+                    app.set_test_status_msg(format!("Commit failed: {}", message).into());
                 }
             }
             Ok(other) => warn!("Unexpected response: {:?}", other),
-            Err(e) => warn!("Failed to apply optimizations via IPC: {}", e),
+            Err(e) => {
+                warn!("Failed to apply optimizations via IPC: {}", e);
+                if let Some(app) = app_weak.upgrade() {
+                    app.set_test_status_msg(format!("Commit failed: {}", e).into());
+                }
+            }
         }
     });
 
@@ -54,10 +66,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!("Rollback successful: {}", message);
                 if let Some(app) = app_weak.upgrade() {
                     app.set_dpc_status("DEFAULT (Unoptimized)".into());
+                    app.set_test_status_msg("System successfully rolled back to baseline configuration.".into());
+                }
+            }
+            Ok(IpcResponse::Error { code, message }) => {
+                warn!("Failed to rollback optimizations [{}]: {}", code, message);
+                if let Some(app) = app_weak.upgrade() {
+                    app.set_test_status_msg(format!("Rollback failed: {}", message).into());
                 }
             }
             Ok(other) => warn!("Unexpected response: {:?}", other),
-            Err(e) => warn!("Failed to rollback optimizations via IPC: {}", e),
+            Err(e) => {
+                warn!("Failed to rollback optimizations via IPC: {}", e);
+                if let Some(app) = app_weak.upgrade() {
+                    app.set_test_status_msg(format!("Rollback failed: {}", e).into());
+                }
+            }
         }
     });
 
@@ -80,6 +104,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             app.set_bufferbloat_delta(format!("+{:.1} ms", report.bufferbloat_delta_ms).into());
                             app.set_bufferbloat_grade(format!("{:?}", report.grade).into());
                             app.set_test_status_msg("Bufferbloat analysis completed successfully.".into());
+                        }
+                    });
+                }
+                Ok(IpcResponse::Error { code, message }) => {
+                    warn!("Bufferbloat test error [{}]: {}", code, message);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(app) = app_handle.upgrade() {
+                            app.set_test_status_msg(format!("Bufferbloat diagnostic failed: {}", message).into());
                         }
                     });
                 }
@@ -121,6 +153,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 report.total_dpcs_captured,
                                 if report.system_suitable_for_competitive { "COMPETITIVE READY" } else { "DEGRADED" }
                             ).into());
+                        }
+                    });
+                }
+                Ok(IpcResponse::Error { code, message }) => {
+                    warn!("Latency report error [{}]: {}", code, message);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(app) = app_handle.upgrade() {
+                            app.set_test_status_msg(format!("Latency profiling failed: {}", message).into());
                         }
                     });
                 }

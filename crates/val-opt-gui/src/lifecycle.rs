@@ -26,7 +26,12 @@ impl EphemeralLifecycleCoordinator {
             auto_relaunch_gui: auto_relaunch,
         };
 
-        // Attempt handoff to daemon
+        // If daemon is not running on pipe, attempt to spawn val-opt-core daemon before UI unloads
+        if !IpcClient::is_daemon_running() {
+            let _ = IpcClient::spawn_daemon();
+        }
+
+        // Attempt handoff to daemon (or standalone execution)
         let _ = IpcClient::send_request(&req);
 
         if terminate_now {

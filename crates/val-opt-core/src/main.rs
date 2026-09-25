@@ -27,7 +27,14 @@ fn main() {
     let mut server = val_opt_core::ipc_server::IpcServer::new();
     if let Err(e) = server.start() {
         tracing::error!("Failed to start IPC server: {}", e);
-    } else {
-        tracing::info!("val-opt-core daemon listening on Named Pipe.");
+        return;
     }
+
+    tracing::info!("val-opt-core daemon listening on Named Pipe: \\\\.\\pipe\\val_opt_ipc");
+
+    while server.is_running() {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+
+    tracing::info!("val-opt-core daemon shut down cleanly.");
 }

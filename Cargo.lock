@@ -4848,6 +4848,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tracing",
  "tracing-subscriber",
+ "val-opt-core",
  "val-opt-shared",
  "windows 0.58.0",
 ]

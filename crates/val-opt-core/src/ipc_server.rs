@@ -222,6 +222,7 @@ impl IpcServer {
                     if let Ok(bytes_read) = reader.read_line(&mut line) {
                         if bytes_read > 0 {
                             let req_res: Result<IpcRequest, _> = decode_message(line.as_bytes());
+                            let is_shutdown = matches!(req_res, Ok(IpcRequest::ShutdownDaemon));
                             let resp = match req_res {
                                 Ok(req) => Self::handle_request(req),
                                 Err(e) => IpcResponse::Error {
@@ -233,6 +234,10 @@ impl IpcServer {
                             if let Ok(encoded_resp) = encode_message(&resp) {
                                 let _ = file.write_all(&encoded_resp);
                                 let _ = file.flush();
+                            }
+
+                            if is_shutdown {
+                                running.store(false, Ordering::SeqCst);
                             }
                         }
                     }
@@ -252,6 +257,18 @@ impl IpcServer {
         #[cfg(not(windows))]
         {
             Ok(())
+        }
+    }
+
+    /// Check if the IPC server is currently running.
+    pub fn is_running(&self) -> bool {
+        self.is_running.load(Ordering::SeqCst)
+    }
+
+    /// Wait for the IPC server background thread to finish.
+    pub fn wait(&mut self) {
+        if let Some(handle) = self.server_handle.take() {
+            let _ = handle.join();
         }
     }
 
