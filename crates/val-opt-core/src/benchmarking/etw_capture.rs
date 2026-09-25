@@ -32,13 +32,13 @@ use windows::Win32::System::Performance::QueryPerformanceFrequency;
 
 use super::frametimes::FrameCollector;
 
-/// Microsoft-Windows-DXGI Provider GUID: {CA11C060-6729-4DA2-B236-B7E3E7F93F11}
+/// Microsoft-Windows-DXGI Provider GUID: {CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}
 pub const DXGI_PROVIDER_GUID: windows::core::GUID =
-    windows::core::GUID::from_u128(0xCA11C060_6729_4DA2_B236_B7E3E7F93F11);
+    windows::core::GUID::from_u128(0xCA11C036_0102_4A2D_A6AD_F03CFED5D3C9);
 
-/// Microsoft-Windows-D3D9 Provider GUID: {7802F644-CF7B-4615-BCD6-379763BC7E0B}
+/// Microsoft-Windows-D3D9 Provider GUID: {783ACA0A-790E-4D7F-8451-AA850511C6B9}
 pub const D3D9_PROVIDER_GUID: windows::core::GUID =
-    windows::core::GUID::from_u128(0x7802F644_CF7B_4615_BCD6_379763BC7E0B);
+    windows::core::GUID::from_u128(0x783ACA0A_790E_4D7F_8451_AA850511C6B9);
 
 /// Microsoft-Windows-Dwm-Core Provider GUID: {9E9B37E1-C80B-47C1-9730-1744C5DE7F66}
 pub const DWM_CORE_PROVIDER_GUID: windows::core::GUID =
@@ -48,6 +48,18 @@ pub const DXGI_PRESENT_START_EVENT_ID: u16 = 42;
 pub const DXGI_PRESENT_STOP_EVENT_ID: u16 = 43;
 pub const D3D9_PRESENT_START_EVENT_ID: u16 = 1;
 pub const D3D9_PRESENT_STOP_EVENT_ID: u16 = 2;
+
+/// Binary payload layout for Microsoft-Windows-DXGI Present_Start (Event ID 42).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DxgiPresentStartPayload {
+    /// 64-bit address of the active IDXGISwapChain instance.
+    pub swap_chain: u64,
+    /// Direct3D/DXGI presentation flags (e.g. DXGI_PRESENT_DO_NOT_WAIT, DXGI_PRESENT_ALLOW_TEARING).
+    pub flags: u32,
+    /// Vertical synchronization interval (0 = uncapped/tearing, 1+ = vsync).
+    pub sync_interval: i32,
+}
 
 /// Standard Win32 ETW session property buffer layout.
 #[repr(C)]
@@ -208,13 +220,12 @@ impl EtwFrameCaptureEngine {
             }
         }
 
-        // Match DXGI or D3D9 frame presentation events
-        let is_dxgi_present = provider == DXGI_PROVIDER_GUID
-            && (event_id == DXGI_PRESENT_START_EVENT_ID
-                || event_id == DXGI_PRESENT_STOP_EVENT_ID
-                || event_id == 44);
-        let is_d3d9_present = provider == D3D9_PROVIDER_GUID
-            && (event_id == D3D9_PRESENT_START_EVENT_ID || event_id == D3D9_PRESENT_STOP_EVENT_ID);
+        // Match DXGI or D3D9 frame presentation start events exclusively.
+        // Present_Stop (43 / 2) marks the exit of the presentation API call, NOT a new frame.
+        // Measuring delta between Start and Stop would erroneously measure API call execution duration (~50µs)
+        // rather than the true frame-to-frame pacing interval (MsBetweenPresents).
+        let is_dxgi_present = provider == DXGI_PROVIDER_GUID && event_id == DXGI_PRESENT_START_EVENT_ID;
+        let is_d3d9_present = provider == D3D9_PROVIDER_GUID && event_id == D3D9_PRESENT_START_EVENT_ID;
 
         if is_dxgi_present || is_d3d9_present {
             let qpc_now = rec.EventHeader.TimeStamp;
@@ -459,7 +470,7 @@ impl EtwFrameCaptureEngine {
         let snapshot = self.collector.snapshot();
         let provenance = TelemetryProvenance {
             source: TelemetrySource::RealEtwPresentation,
-            collection_mechanism: "Microsoft-Windows-DXGI {CA11C060-6729-4DA2-B236-B7E3E7F93F11}, Microsoft-Windows-D3D9 {7802F644-CF7B-4615-BCD6-379763BC7E0B}".to_string(),
+            collection_mechanism: "Microsoft-Windows-DXGI {CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}, Microsoft-Windows-D3D9 {783ACA0A-790E-4D7F-8451-AA850511C6B9}".to_string(),
             timestamp_source: "QueryPerformanceCounter (QPC)".to_string(),
             unit: "Milliseconds".to_string(),
             is_directly_measured: true,

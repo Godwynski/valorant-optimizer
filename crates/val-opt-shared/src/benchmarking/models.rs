@@ -53,7 +53,7 @@ impl Default for TelemetryProvenance {
     fn default() -> Self {
         Self {
             source: TelemetrySource::RealEtwPresentation,
-            collection_mechanism: "Microsoft-Windows-DXGI {CA11C060-6729-4DA2-B236-B7E3E7F93F11}".to_string(),
+            collection_mechanism: "Microsoft-Windows-DXGI {CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}".to_string(),
             timestamp_source: "QueryPerformanceCounter (QPC)".to_string(),
             unit: "Milliseconds".to_string(),
             is_directly_measured: true,
@@ -150,10 +150,15 @@ pub struct ABComparisonReport {
     pub baseline_pacing_std_dev: f64,
     pub optimized_pacing_std_dev: f64,
     pub delta_pacing_std_dev_percent: f64,
-    // Parametric statistics (Welch's t-test)
+    // Parametric statistics (Independent two-sample Welch's t-test)
     pub t_statistic: f64,
     pub degrees_of_freedom: f64,
     pub p_value: f64,
+    // Paired difference statistics (for interleaved A_i <-> B_i blocks)
+    pub paired_t_stat: f64,
+    pub paired_p_value: f64,
+    // Standardized effect size (Cohen's d)
+    pub cohens_d: f64,
     // Non-parametric rank-sum test (Mann-Whitney U)
     pub mann_whitney_u_stat: f64,
     pub mann_whitney_p_value: f64,

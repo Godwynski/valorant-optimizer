@@ -149,8 +149,16 @@ mod tests {
         assert_eq!(collector.count(), 0);
     }
 
+    /// Benchmarks the in-process synthetic user-mode sample ingestion overhead of the FrameCollector.
+    ///
+    /// IMPORTANT TELEMETRY OVERHEAD CLASSIFICATION:
+    /// - This test measures ONLY user-mode memory ingestion into the FrameCollector ring buffer.
+    /// - It DOES NOT measure kernel ETW buffer management, context switches for ProcessTrace,
+    ///   or dxgi.dll provider emission overhead.
+    /// - Actual production ETW collection overhead is classified as:
+    ///   `UNVERIFIED — production ETW collection overhead not measured` (requires live elevated gaming benchmark capture).
     #[test]
-    fn test_ingestion_cpu_overhead() {
+    fn test_synthetic_collector_ingestion_cpu_overhead() {
         use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
         use windows::Win32::Foundation::FILETIME;
 
@@ -172,7 +180,7 @@ mod tests {
 
         let wall_start = std::time::Instant::now();
 
-        // Ingest 50,000 frame telemetry samples
+        // Ingest 50,000 synthetic frame telemetry samples into user-mode collector
         for i in 1..=50_000 {
             collector.record_sample(FrameSample {
                 frame_index: i as u64,
@@ -201,14 +209,14 @@ mod tests {
         let cpu_utilization_percent = (cpu_time_ms / simulated_gameplay_duration_ms) * 100.0;
 
         println!(
-            "Ingestion performance: 50,000 frames ingested in {:?}, consumed {:.2}ms CPU time. Overhead across 3.4 mins of 240Hz play = {:.4}%",
+            "Synthetic Collector Ingestion: 50,000 frames ingested in {:?}, consumed {:.2}ms CPU time. In-process overhead across 3.4 mins of 240Hz play = {:.4}%. (NOTE: Production kernel ETW collection overhead is UNVERIFIED).",
             wall_elapsed, cpu_time_ms, cpu_utilization_percent
         );
 
-        // Verification requirement: Overhead must be < 0.2%
+        // Verification requirement: In-process synthetic ingestion overhead must be < 0.2%
         assert!(
             cpu_utilization_percent < 0.2,
-            "Frame ingestion overhead must be < 0.2%, measured {:.4}%",
+            "Synthetic frame ingestion overhead must be < 0.2%, measured {:.4}%",
             cpu_utilization_percent
         );
     }

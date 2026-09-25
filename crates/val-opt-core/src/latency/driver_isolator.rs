@@ -19,6 +19,8 @@ pub struct LoadedDriver {
     pub base_address: u64,
     pub name: String,
     pub path: String,
+    /// Indicates whether base_address was verified via elevated EnumDeviceDrivers or is unverified.
+    pub is_verified_base: bool,
 }
 
 /// The driver fault isolator tracking DPC execution times correlated by kernel module.
@@ -85,6 +87,7 @@ impl KernelDriverIsolator {
                             base_address: addr as u64,
                             name,
                             path,
+                            is_verified_base: true,
                         });
                     }
                 }
@@ -92,11 +95,11 @@ impl KernelDriverIsolator {
         }
 
         // If Win32 EnumDeviceDrivers was restricted by KASLR in non-elevated mode,
-        // dynamically query loaded device drivers via driverquery /FO CSV
+        // dynamically query loaded device driver names via driverquery /FO CSV for system inventory.
+        // NOTE: We do NOT assign fake synthetic base addresses! Unverified base addresses remain 0.
         if loaded.is_empty() {
             if let Ok(output) = std::process::Command::new("driverquery").args(["/FO", "CSV"]).output() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let mut base_offset = 0xFFFFF80001000000u64;
                 for line in stdout.lines().skip(1) {
                     let parts: Vec<&str> = line.split(',').collect();
                     if !parts.is_empty() {
@@ -109,11 +112,11 @@ impl KernelDriverIsolator {
                             };
                             let path = format!(r"C:\Windows\System32\drivers\{}", name);
                             loaded.push(LoadedDriver {
-                                base_address: base_offset,
+                                base_address: 0,
                                 name,
                                 path,
+                                is_verified_base: false,
                             });
-                            base_offset += 0x1000000;
                         }
                     }
                 }
@@ -123,29 +126,34 @@ impl KernelDriverIsolator {
         // Secondary fallback if driverquery is unavailable
         if loaded.is_empty() {
             loaded.push(LoadedDriver {
-                base_address: 0xFFFFF80000000000,
+                base_address: 0,
                 name: "ntoskrnl.exe".to_string(),
                 path: r"C:\Windows\System32\ntoskrnl.exe".to_string(),
+                is_verified_base: false,
             });
             loaded.push(LoadedDriver {
-                base_address: 0xFFFFF80001000000,
+                base_address: 0,
                 name: "ndis.sys".to_string(),
                 path: r"C:\Windows\System32\drivers\ndis.sys".to_string(),
+                is_verified_base: false,
             });
             loaded.push(LoadedDriver {
-                base_address: 0xFFFFF80002000000,
+                base_address: 0,
                 name: "nvlddmkm.sys".to_string(),
                 path: r"C:\Windows\System32\drivers\nvlddmkm.sys".to_string(),
+                is_verified_base: false,
             });
             loaded.push(LoadedDriver {
-                base_address: 0xFFFFF80003000000,
+                base_address: 0,
                 name: "rt640x64.sys".to_string(),
                 path: r"C:\Windows\System32\drivers\rt640x64.sys".to_string(),
+                is_verified_base: false,
             });
             loaded.push(LoadedDriver {
-                base_address: 0xFFFFF80004000000,
+                base_address: 0,
                 name: "vgk.sys".to_string(),
                 path: r"C:\Program Files\Riot Vanguard\vgk.sys".to_string(),
+                is_verified_base: false,
             });
         }
 
@@ -157,22 +165,44 @@ impl KernelDriverIsolator {
         *lock = loaded;
     }
 
+    /// Add a verified driver entry for test fixtures.
+    #[cfg(test)]
+    pub fn add_driver_for_testing(&self, base_address: u64, name: String, path: String) {
+        let mut drivers = self.drivers.write().unwrap();
+        drivers.push(LoadedDriver {
+            base_address,
+            name,
+            path,
+            is_verified_base: true,
+        });
+        drivers.sort_by_key(|d| d.base_address);
+    }
+
     /// Resolve an arbitrary kernel routine memory address to its parent driver (.sys).
+    ///
+    /// STRICTURE: Only resolves against drivers whose base address was directly verified
+    /// via native Win32 EnumDeviceDrivers. Does NOT falsely attribute routines to unverified
+    /// driver entries or synthetic fallback addresses.
     pub fn resolve_address(&self, address: u64) -> Option<LoadedDriver> {
+        if address == 0 {
+            return None;
+        }
+
         let drivers = self.drivers.read().unwrap();
-        if drivers.is_empty() {
+        let verified: Vec<&LoadedDriver> = drivers.iter().filter(|d| d.is_verified_base && d.base_address > 0).collect();
+        if verified.is_empty() {
             return None;
         }
 
         // Binary search for highest base_address <= address
-        match drivers.binary_search_by_key(&address, |d| d.base_address) {
-            Ok(idx) => Some(drivers[idx].clone()),
+        match verified.binary_search_by_key(&address, |d| d.base_address) {
+            Ok(idx) => Some((*verified[idx]).clone()),
             Err(idx) => {
                 if idx > 0 {
-                    let candidate = &drivers[idx - 1];
+                    let candidate = verified[idx - 1];
                     // Kernel drivers are rarely larger than 64MB; guard against wild pointer mismatches
                     if address < candidate.base_address + 0x4000000 {
-                        Some(candidate.clone())
+                        Some((*candidate).clone())
                     } else {
                         None
                     }
@@ -188,7 +218,13 @@ impl KernelDriverIsolator {
         let (driver_name, driver_path, base_addr) = if let Some(driver) = self.resolve_address(routine_address) {
             (driver.name, driver.path, driver.base_address)
         } else {
-            ("UnknownKernelRoutine".to_string(), "Unknown".to_string(), 0)
+            let drivers = self.drivers.read().unwrap();
+            let has_verified = drivers.iter().any(|d| d.is_verified_base && d.base_address > 0);
+            if !has_verified {
+                ("UnknownKernelRoutine (Administrator elevation required to resolve KASLR addresses)".to_string(), "Unknown".to_string(), 0)
+            } else {
+                ("UnknownKernelRoutine".to_string(), "Unknown".to_string(), 0)
+            }
         };
 
         let mut stats_map = self.driver_stats.write().unwrap();
@@ -268,27 +304,36 @@ mod tests {
     #[test]
     fn test_address_resolution_and_fault_isolation() {
         let isolator = KernelDriverIsolator::new();
-        let drivers = isolator.drivers.read().unwrap().clone();
-        assert!(!drivers.is_empty());
+        // Insert a verified driver with an explicit kernel base address for deterministic testing
+        let test_base = 0xFFFFF80010000000u64;
+        isolator.add_driver_for_testing(
+            test_base,
+            "test_nvlddmkm.sys".to_string(),
+            r"C:\Windows\System32\drivers\nvlddmkm.sys".to_string(),
+        );
 
-        let target_driver = &drivers[0];
-        let test_addr = target_driver.base_address + 0x1234;
+        let test_addr = test_base + 0x1234;
 
         let resolved = isolator.resolve_address(test_addr);
         assert!(resolved.is_some());
-        assert_eq!(resolved.unwrap().name, target_driver.name);
+        assert_eq!(resolved.unwrap().name, "test_nvlddmkm.sys");
 
         // Record a benign execution (120us)
         let name = isolator.record_execution(test_addr, 120);
-        assert_eq!(name, target_driver.name);
+        assert_eq!(name, "test_nvlddmkm.sys");
         assert_eq!(isolator.get_offending_drivers().len(), 0);
 
         // Record an offending spike (750us > 500us threshold)
         isolator.record_execution(test_addr, 750);
         let offending = isolator.get_offending_drivers();
         assert_eq!(offending.len(), 1);
-        assert_eq!(offending[0].driver_name, target_driver.name);
+        assert_eq!(offending[0].driver_name, "test_nvlddmkm.sys");
         assert_eq!(offending[0].max_execution_us, 750);
         assert!(offending[0].exceeds_500us_threshold);
+
+        // Verify unverified/unmapped routine address is not falsely attributed
+        let unknown_addr = 0xFFFFF80099000000u64;
+        let unknown_name = isolator.record_execution(unknown_addr, 200);
+        assert_eq!(unknown_name, "UnknownKernelRoutine");
     }
 }

@@ -337,14 +337,16 @@ impl ABBenchmarkRunner {
 ## 1. Executive Summary & Verdict
 - **Telemetry Source:** `{:?}`
 - **Experimental Design:** Interleaved Paired Trials ($A_1 \to B_1 \to A_2 \to B_2 \dots$)
-- **Trials per State:** {} repeated runs
-- **Non-Parametric Mann-Whitney U Test:** p = {:.6} (U = {:.1})
-- **Bootstrap 95% Confidence Interval (1% Low Delta):** [{:+.2} FPS, {:+.2} FPS]
-- **Levene Pacing Variance Test:** p = {:.6} (F = {:.4})
+- **Sample Unit:** Independent trial-level aggregates ($N = {}$ matched pairs)
+- **Standardized Effect Size (Cohen's d):** **{:.2}** (pooled within-group SD)
+- **Paired Student's t-test ($D_i = B_i - A_i$):** t = {:.4}, p = {:.6} (df = {})
+- **Independent Welch's t-test:** t = {:.4}, p = {:.6} (df = {:.1})
+- **Non-Parametric Mann-Whitney U Test:** U = {:.1}, p = {:.6}
+- **Bootstrap 95% Confidence Interval (1% Low Delta):** [{:+.2}%, {:+.2}%]
+- **Levene Pacing Variance Test:** F = {:.4}, p = {:.6}
 - **Pacing Variance Significantly Reduced:** **{}**
-- **Student's t-test p-value:** {:.6} ($\alpha = 0.01$)
-- **Statistically Significant:** **{}**
-- **Meets 3.0% Minimum Effect Threshold:** **{}**
+- **Statistically Significant ($\alpha = 0.01$, CI > 0%):** **{}**
+- **Meets 3.0% Practical Significance Threshold ($\Delta \ge 3.0\%$):** **{}**
 - **Final Recommendation:** **{}**
 
 ---
@@ -375,14 +377,20 @@ impl ABBenchmarkRunner {
             report.optimized_label,
             report.provenance.source,
             report.trials_count,
-            report.mann_whitney_p_value,
+            report.cohens_d,
+            report.paired_t_stat,
+            report.paired_p_value,
+            report.trials_count.saturating_sub(1),
+            report.t_statistic,
+            report.p_value,
+            report.degrees_of_freedom,
             report.mann_whitney_u_stat,
+            report.mann_whitney_p_value,
             report.bootstrap_one_percent_ci.0,
             report.bootstrap_one_percent_ci.1,
-            report.levene_p_value,
             report.levene_f_stat,
+            report.levene_p_value,
             if report.is_variance_significantly_reduced { "YES (Pacing hitching reduced)" } else { "NO / Indeterminate" },
-            report.p_value,
             if report.is_statistically_significant { "YES (Robust confirmation)" } else { "NO (Not significant)" },
             if report.meets_threshold { "YES (Delta >= 3.0%)" } else { "NO" },
             report.recommendation,

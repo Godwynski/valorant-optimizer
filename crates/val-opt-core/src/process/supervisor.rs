@@ -534,11 +534,25 @@ mod tests {
                 .spawn();
 
             if let Ok(mut c) = child {
+                let spoofed_pid = c.id();
                 std::thread::sleep(Duration::from_millis(150));
 
-                // ProcessSupervisor MUST reject this binary because its path does not match ShooterGame shipping path
-                let detected = ProcessSupervisor::find_process_with_path(VALORANT_BINARY_NAME);
-                assert!(detected.is_none(), "Spoofed VALORANT binary in temp dir must be rejected by full path verification");
+                // 1. ProcessSupervisor MUST reject the spoofed binary PID
+                if let Some((detected_pid, detected_path)) = ProcessSupervisor::find_process_with_path(VALORANT_BINARY_NAME) {
+                    assert_ne!(
+                        detected_pid, spoofed_pid,
+                        "Spoofed VALORANT binary (PID {}) in temp dir was accepted! Path: {}",
+                        spoofed_pid, detected_path
+                    );
+                }
+
+                // 2. Directly verify path validator rejects temp binary path
+                let spoofed_path_str = spoofed_exe.to_string_lossy();
+                assert!(
+                    !ProcessSupervisor::is_legitimate_game_path(VALORANT_BINARY_NAME, &spoofed_path_str),
+                    "is_legitimate_game_path must reject spoofed binary at {}",
+                    spoofed_path_str
+                );
 
                 let _ = c.kill();
                 let _ = c.wait();

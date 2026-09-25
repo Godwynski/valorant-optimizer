@@ -171,6 +171,83 @@ pub fn welch_t_test(sample_a: &[f64], sample_b: &[f64]) -> Result<(f64, f64, f64
     Ok((t_stat, df, p_value))
 }
 
+/// Compute paired Student's t-test for matched pairs across interleaved blocks (A_i <-> B_i).
+///
+/// Operates on independent trial-level difference observations: D_i = B_i - A_i.
+/// Directly accounts for temporal blocking covariance, eliminating gradual drift
+/// (thermal buildup, background OS tasks) from the residual error term.
+///
+/// Returns (t_statistic, degrees_of_freedom, two_tailed_p_value).
+pub fn paired_t_test(sample_a: &[f64], sample_b: &[f64]) -> Result<(f64, f64, f64), String> {
+    let n = sample_a.len();
+    if n != sample_b.len() {
+        return Err(format!(
+            "Paired t-test requires equal sample sizes, got {} and {}",
+            n, sample_b.len()
+        ));
+    }
+    if n < 2 {
+        return Err(format!("Paired t-test requires at least 2 pairs, got {}", n));
+    }
+
+    let diffs: Vec<f64> = sample_b.iter().zip(sample_a.iter()).map(|(&b, &a)| b - a).collect();
+    let mean_diff = diffs.iter().sum::<f64>() / (n as f64);
+
+    let var_diff = diffs.iter().map(|&d| (d - mean_diff).powi(2)).sum::<f64>() / ((n - 1) as f64);
+    let se_diff = (var_diff / (n as f64)).sqrt();
+    let df = (n - 1) as f64;
+
+    if se_diff <= 1e-12 {
+        if mean_diff.abs() < 1e-12 {
+            return Ok((0.0, df, 1.0));
+        }
+        return Ok((f64::INFINITY, df, 0.0));
+    }
+
+    let t_stat = mean_diff / se_diff;
+    let p_value = compute_t_distribution_two_tailed_p(t_stat.abs(), df);
+
+    Ok((t_stat, df, p_value))
+}
+
+/// Compute Cohen's d standardized effect size between two sample groups.
+///
+/// d = (mean_b - mean_a) / s_pooled
+///
+/// Effect size interpretation:
+/// - |d| < 0.20: Negligible
+/// - 0.20 <= |d| < 0.50: Small
+/// - 0.50 <= |d| < 0.80: Medium
+/// - |d| >= 0.80: Large
+pub fn compute_cohens_d(sample_a: &[f64], sample_b: &[f64]) -> f64 {
+    let n1 = sample_a.len() as f64;
+    let n2 = sample_b.len() as f64;
+    if n1 < 2.0 || n2 < 2.0 {
+        return 0.0;
+    }
+
+    let mean1: f64 = sample_a.iter().sum::<f64>() / n1;
+    let mean2: f64 = sample_b.iter().sum::<f64>() / n2;
+
+    let var1: f64 = sample_a.iter().map(|&x| (x - mean1).powi(2)).sum::<f64>() / (n1 - 1.0);
+    let var2: f64 = sample_b.iter().map(|&x| (x - mean2).powi(2)).sum::<f64>() / (n2 - 1.0);
+
+    let pooled_var = (((n1 - 1.0) * var1) + ((n2 - 1.0) * var2)) / (n1 + n2 - 2.0);
+    let pooled_sd = pooled_var.sqrt();
+
+    if pooled_sd <= 1e-12 {
+        if (mean2 - mean1).abs() < 1e-12 {
+            0.0
+        } else if mean2 > mean1 {
+            f64::INFINITY
+        } else {
+            f64::NEG_INFINITY
+        }
+    } else {
+        (mean2 - mean1) / pooled_sd
+    }
+}
+
 /// Compute two-tailed p-value from t-statistic and degrees of freedom
 /// using the regularized incomplete beta function: p = I_{df / (df + t^2)}(df/2, 1/2)
 pub fn compute_t_distribution_two_tailed_p(t: f64, df: f64) -> f64 {
@@ -312,23 +389,37 @@ pub fn compare_ab_trials(
     let delta_pacing_std_dev_percent = ((optimized_pacing_std_dev - baseline_pacing_std_dev) / baseline_pacing_std_dev) * 100.0;
 
     let (t_statistic, degrees_of_freedom, p_value) = welch_t_test(&base_1p, &opt_1p)?;
+    let (paired_t_stat, _paired_df, paired_p_value) =
+        paired_t_test(&base_1p, &opt_1p).unwrap_or((0.0, (n.saturating_sub(1)) as f64, 1.0));
+    let cohens_d = compute_cohens_d(&base_1p, &opt_1p);
     let (mann_whitney_u_stat, mann_whitney_p_value) = mann_whitney_u_test(&base_1p, &opt_1p).unwrap_or((0.0, 1.0));
     let bootstrap_one_percent_ci = bootstrap_percentile_delta_ci(&base_1p, &opt_1p, 2000, 0.95).unwrap_or((0.0, 0.0));
     let (levene_f_stat, levene_p_value) = levene_variance_test(&base_pacing, &opt_pacing).unwrap_or((0.0, 1.0));
     let is_variance_significantly_reduced = levene_p_value < 0.05 && optimized_pacing_std_dev < baseline_pacing_std_dev;
 
-    // Both parametric and non-parametric tests considered for robust confirmation
-    let is_statistically_significant = p_value < 0.01 && mann_whitney_p_value < 0.05;
+    // Both parametric (Welch's or Paired t-test) and non-parametric tests considered for robust confirmation,
+    // and the 95% bootstrap confidence interval lower bound must strictly exclude zero (CI_low > 0.0%).
+    let is_statistically_significant = (p_value < 0.01 || paired_p_value < 0.01)
+        && mann_whitney_p_value < 0.05
+        && bootstrap_one_percent_ci.0 > 0.0;
+
+    // Practical significance threshold: Delta >= 3.0% (Minimum Clinically/Perceptually Important Difference)
     let meets_threshold = is_statistically_significant && (delta_one_percent_low_percent >= 3.0 || delta_avg_fps_percent >= 3.0);
 
     let recommendation = if meets_threshold {
-        "ACCEPTED — Statistically significant performance improvement confirmed (p < 0.01, Delta >= 3.0%)".to_string()
+        format!(
+            "ACCEPTED — Statistically significant performance improvement confirmed (p < 0.01, Delta >= 3.0%, Cohen's d = {:.2})",
+            cohens_d
+        )
     } else if is_statistically_significant && delta_one_percent_low_percent > 0.0 {
-        "BORDERLINE — Statistically significant but under 3.0% effect threshold (Minor gain)".to_string()
+        format!(
+            "BORDERLINE — Statistically significant but under 3.0% practical threshold (Delta = +{:.2}%, Cohen's d = {:.2})",
+            delta_one_percent_low_percent, cohens_d
+        )
     } else if delta_one_percent_low_percent < -1.0 {
         "REJECTED — Optimization caused performance regression".to_string()
     } else {
-        "REJECTED (Placebo / Statistically Insignificant) — Failed significance test".to_string()
+        "REJECTED (Placebo / Statistically Insignificant) — Failed significance test or CI includes zero".to_string()
     };
 
     let provenance = baseline_runs.first().map(|r| r.provenance.clone()).unwrap_or_default();
@@ -355,6 +446,9 @@ pub fn compare_ab_trials(
         t_statistic,
         degrees_of_freedom,
         p_value,
+        paired_t_stat,
+        paired_p_value,
+        cohens_d,
         mann_whitney_u_stat,
         mann_whitney_p_value,
         bootstrap_one_percent_ci,
@@ -669,5 +763,35 @@ mod tests {
         let (f_stat, p_val) = levene_variance_test(&a, &b).expect("Levene test must succeed");
         assert!(f_stat > 10.0, "Expected large F-statistic for variance difference, got {}", f_stat);
         assert!(p_val < 0.01, "Expected significant p-value for variance reduction, got {}", p_val);
+    }
+
+    #[test]
+    fn test_paired_t_test_accuracy() {
+        let baseline = vec![230.0, 232.0, 229.0, 231.0, 230.5];
+        let optimized = vec![255.0, 258.0, 256.0, 257.5, 259.0];
+
+        let (t_stat, df, p_val) = paired_t_test(&baseline, &optimized).expect("Paired t-test must succeed");
+        assert_eq!(df, 4.0, "Degrees of freedom must be N - 1 = 4");
+        assert!(t_stat > 20.0, "Expected large paired t-statistic, got {}", t_stat);
+        assert!(p_val < 0.0001, "Expected highly significant paired p-value, got {}", p_val);
+
+        // Mismatched lengths should error
+        let err = paired_t_test(&baseline, &vec![250.0]);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_cohens_d_calculation() {
+        let baseline = vec![230.0, 230.0, 230.0, 230.0];
+        let identical = vec![230.0, 230.0, 230.0, 230.0];
+        assert_eq!(compute_cohens_d(&baseline, &identical), 0.0);
+
+        let optimized = vec![250.0, 250.0, 250.0, 250.0];
+        assert_eq!(compute_cohens_d(&baseline, &optimized), f64::INFINITY);
+
+        let g1 = vec![100.0, 102.0, 104.0, 98.0, 96.0]; // mean = 100, s ~ 3.16
+        let g2 = vec![110.0, 112.0, 114.0, 108.0, 106.0]; // mean = 110, s ~ 3.16
+        let d = compute_cohens_d(&g1, &g2);
+        assert!(d > 3.0, "Expected large Cohen's d (> 3.0), got {}", d);
     }
 }
