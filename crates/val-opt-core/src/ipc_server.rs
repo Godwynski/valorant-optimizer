@@ -13,6 +13,9 @@ use std::time::Duration;
 use tracing::{info, warn};
 use val_opt_shared::ipc::{decode_message, encode_message, IpcRequest, IpcResponse, VAL_OPT_PIPE_NAME};
 
+/// Global tracker for the active process supervisor cancellation signal.
+static ACTIVE_SUPERVISOR_STOP: std::sync::Mutex<Option<Arc<AtomicBool>>> = std::sync::Mutex::new(None);
+
 /// The unified IPC server hosting the Windows Named Pipe.
 pub struct IpcServer {
     is_running: Arc<AtomicBool>,
@@ -58,9 +61,12 @@ impl IpcServer {
             IpcRequest::GetStatus => {
                 let primary_adapter = val_opt_shared::hardware::network::NetworkAdapterInfo::detect_primary().ok();
                 let adapter_name = primary_adapter.map(|a| a.adapter_name).unwrap_or_else(|| "Unknown".to_string());
+                let is_game_running = crate::process::supervisor::ProcessSupervisor::find_process_by_name(
+                    crate::process::supervisor::VALORANT_BINARY_NAME,
+                ).is_some();
                 IpcResponse::Status {
                     daemon_version: env!("CARGO_PKG_VERSION").to_string(),
-                    is_game_running: false,
+                    is_game_running,
                     is_optimized: true,
                     active_profile: format!("Competitive Extreme ({})", adapter_name),
                 }
@@ -97,6 +103,13 @@ impl IpcServer {
             }
 
             IpcRequest::RollbackOptimizations => {
+                // Signal any active game supervisor thread to exit
+                if let Ok(mut lock) = ACTIVE_SUPERVISOR_STOP.lock() {
+                    if let Some(signal) = lock.take() {
+                        signal.store(true, Ordering::Relaxed);
+                    }
+                }
+
                 let crash_report = crate::state::CrashRecoveryService::check_and_recover(None);
                 let coord_report = crate::optimizations::OptimizationCoordinator::recover_orphaned_transaction();
 
@@ -163,23 +176,69 @@ impl IpcServer {
             }
 
             IpcRequest::LaunchOptimizedGame { auto_relaunch_gui: _ } => {
-                // Pre-flight Vanguard anti-cheat validation
-                match crate::safety::VanguardChecker::ensure_compliant(false) {
-                    Ok(_) => {
-                        let _ = crate::optimizations::OptimizationCoordinator::apply_optimizations();
-                        IpcResponse::GameLaunchAcknowledged {
-                            message: "VALORANT launch initiated. Core daemon supervising process lifecycle.".to_string(),
-                        }
-                    }
-                    Err(e) => IpcResponse::Error {
+                // 1. Pre-flight Vanguard anti-cheat validation
+                if let Err(e) = crate::safety::VanguardChecker::ensure_compliant(false) {
+                    return IpcResponse::Error {
                         code: "VANGUARD_VIOLATION".to_string(),
                         message: e.to_string(),
-                    },
+                    };
+                }
+
+                // 2. Query CPU topology for P-core affinity mask
+                let p_core_mask = val_opt_shared::hardware::cpu::CpuInfo::detect()
+                    .ok()
+                    .and_then(|c| c.p_core_affinity_mask);
+
+                // 3. Purge Tier 2 background applications and collect backups for post-match restoration
+                let backups = crate::process::terminator::terminate_tier2_background_processes().unwrap_or_default();
+
+                // 4. Apply system-level optimizations (timer resolution, network QoS, game mode, power scheme)
+                let _ = crate::optimizations::OptimizationCoordinator::apply_optimizations();
+
+                // 5. Spawn background ProcessSupervisor watcher thread (TASK-FUNC-02)
+                let supervisor_config = crate::process::supervisor::GameSupervisorConfig {
+                    target_binary: crate::process::supervisor::VALORANT_BINARY_NAME.to_string(),
+                    p_core_affinity_mask: p_core_mask,
+                    terminate_cef_ui: true,
+                    poll_interval_ms: 500,
+                };
+                let stop_signal = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                if let Ok(mut lock) = ACTIVE_SUPERVISOR_STOP.lock() {
+                    if let Some(prev) = lock.take() {
+                        prev.store(true, Ordering::Relaxed);
+                    }
+                    *lock = Some(stop_signal.clone());
+                }
+
+                let _ = crate::process::supervisor::ProcessSupervisor::start_background_supervision(
+                    supervisor_config,
+                    backups,
+                    stop_signal,
+                );
+
+                // 6. Complete the VALORANT launch flow (TASK-FUNC-03)
+                match crate::process::valorant_launcher::ValorantLauncher::launch_game() {
+                    Ok(status_msg) => {
+                        IpcResponse::GameLaunchAcknowledged {
+                            message: format!("{}. Core daemon active and supervising.", status_msg),
+                        }
+                    }
+                    Err(e) => {
+                        IpcResponse::Error {
+                            code: "LAUNCH_FAILED".to_string(),
+                            message: e.to_string(),
+                        }
+                    }
                 }
             }
 
             IpcRequest::ShutdownDaemon => {
                 info!("IPC shutdown command received from client");
+                if let Ok(mut lock) = ACTIVE_SUPERVISOR_STOP.lock() {
+                    if let Some(signal) = lock.take() {
+                        signal.store(true, Ordering::Relaxed);
+                    }
+                }
                 IpcResponse::Pong
             }
         }
@@ -379,6 +438,7 @@ impl IpcServer {
                     }
 
                     unsafe {
+                        let _ = windows::Win32::Storage::FileSystem::FlushFileBuffers(pipe_handle);
                         let _ = DisconnectNamedPipe(pipe_handle);
                     }
                 }

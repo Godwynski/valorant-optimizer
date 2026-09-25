@@ -8,8 +8,41 @@ if (-not (Test-Path $LibDir)) {
     New-Item -ItemType Directory -Path $LibDir -Force | Out-Null
 }
 
-$dumpbin = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\dumpbin.exe"
-$libexe  = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\lib.exe"
+$dumpbin = $null
+$libexe  = $null
+
+$cmdDumpbin = Get-Command "dumpbin.exe" -ErrorAction SilentlyContinue
+if ($cmdDumpbin) { $dumpbin = $cmdDumpbin.Source }
+$cmdLib = Get-Command "lib.exe" -ErrorAction SilentlyContinue
+if ($cmdLib) { $libexe = $cmdLib.Source }
+
+if (-not $dumpbin -or -not $libexe) {
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if ($vsPath) {
+            $msvcRoot = Join-Path $vsPath "VC\Tools\MSVC"
+            if (Test-Path $msvcRoot) {
+                $latestMsvc = Get-ChildItem $msvcRoot | Sort-Object Name -Descending | Select-Object -First 1
+                if ($latestMsvc) {
+                    if (-not $dumpbin) {
+                        $candidate = Join-Path $latestMsvc.FullName "bin\Hostx64\x64\dumpbin.exe"
+                        if (Test-Path $candidate) { $dumpbin = $candidate }
+                    }
+                    if (-not $libexe) {
+                        $candidate = Join-Path $latestMsvc.FullName "bin\Hostx64\x64\lib.exe"
+                        if (Test-Path $candidate) { $libexe = $candidate }
+                    }
+                }
+            }
+        }
+    }
+}
+
+if (-not $dumpbin -or -not $libexe) {
+    Write-Error "dumpbin.exe or lib.exe could not be located via PATH or Visual Studio installation."
+    exit 1
+}
 
 $dlls = @(
     "kernel32",

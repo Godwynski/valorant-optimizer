@@ -183,7 +183,8 @@ fn query_vanguard_status() -> (bool, bool) {
         SC_STATUS_PROCESS_INFO,
     };
 
-    let vgk_path = std::path::Path::new("C:\\Program Files\\Riot Vanguard\\vgk.sys");
+    let prog_files = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
+    let vgk_path = std::path::PathBuf::from(prog_files).join("Riot Vanguard").join("vgk.sys");
     let driver_installed = vgk_path.exists();
 
     let mut service_running = false;

@@ -21,11 +21,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     initialize_telemetry(&app);
 
     // 1. Launch Optimized (Ephemeral UI handoff)
-    let _app_weak = app.as_weak();
+    let app_weak = app.as_weak();
     app.on_launch_clicked(move || {
-        info!("'Launch Optimized' clicked. Triggering Ephemeral UI Unload...");
-        if let Err(e) = EphemeralLifecycleCoordinator::trigger_launch_and_unload(true, true) {
-            warn!("Launch handoff error: {}", e);
+        info!("'Launch Optimized' clicked. Triggering Game Launch...");
+        let terminate_now = app_weak.upgrade().map(|a| a.get_unload_gui_on_launch()).unwrap_or(true);
+        match EphemeralLifecycleCoordinator::trigger_launch_and_unload(true, terminate_now) {
+            Ok(msg) => {
+                info!("Launch handoff acknowledged: {}", msg);
+                if !terminate_now {
+                    if let Some(app) = app_weak.upgrade() {
+                        app.set_test_status_msg(format!("Game launched: {}", msg).into());
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Launch handoff error: {}", e);
+                if let Some(app) = app_weak.upgrade() {
+                    app.set_test_status_msg(format!("Launch failed: {}", e).into());
+                }
+            }
         }
     });
 

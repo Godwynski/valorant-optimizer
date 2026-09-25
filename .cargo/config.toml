@@ -1,9 +1,5 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = [
-    "-L", "native=c:/Users/Godwyn/Documents/Projects/valorant optimize/lib64",
-    "-C", "linker=C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64\\link.exe",
-    "-C", "link-arg=/LIBPATH:C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\lib\\x64",
-    "-C", "link-arg=/LIBPATH:c:\\Users\\Godwyn\\Documents\\Projects\\valorant optimize\\lib64",
     "-C", "control-flow-guard=yes",
     "-C", "link-arg=/GUARD:CF",
     "-C", "link-arg=/DYNAMICBASE",
@@ -11,4 +7,3 @@ rustflags = [
     "-C", "link-arg=/NXCOMPAT",
     "-C", "link-arg=/CETCOMPAT",
 ]
-

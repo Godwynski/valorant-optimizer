@@ -50,7 +50,8 @@ impl IpcClient {
             // Candidate 2: target/debug or target/release relative to CWD
             candidates.push(std::path::PathBuf::from("target/release/val-opt-core.exe"));
             candidates.push(std::path::PathBuf::from("target/debug/val-opt-core.exe"));
-            candidates.push(std::path::PathBuf::from(r"C:\Program Files\ValorantOptimizer\val-opt-core.exe"));
+            let prog_files = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string());
+            candidates.push(std::path::PathBuf::from(prog_files).join("ValorantOptimizer").join("val-opt-core.exe"));
 
             for path in candidates {
                 if path.exists() {

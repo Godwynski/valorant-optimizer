@@ -10,21 +10,24 @@ Write-Host "==========================================================" -Foregro
 Write-Host "   VALORANT Optimizer: Binary Hardening Verification      " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-$dumpbinPaths = @(
-    "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\dumpbin.exe",
-    "dumpbin.exe"
-)
-
 $dumpbin = $null
-foreach ($p in $dumpbinPaths) {
-    if (Test-Path $p) {
-        $dumpbin = $p
-        break
-    }
-    $cmd = Get-Command $p -ErrorAction SilentlyContinue
-    if ($cmd) {
-        $dumpbin = $cmd.Source
-        break
+$cmd = Get-Command "dumpbin.exe" -ErrorAction SilentlyContinue
+if ($cmd) {
+    $dumpbin = $cmd.Source
+} else {
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if ($vsPath) {
+            $msvcRoot = Join-Path $vsPath "VC\Tools\MSVC"
+            if (Test-Path $msvcRoot) {
+                $latestMsvc = Get-ChildItem $msvcRoot | Sort-Object Name -Descending | Select-Object -First 1
+                if ($latestMsvc) {
+                    $candidate = Join-Path $latestMsvc.FullName "bin\Hostx64\x64\dumpbin.exe"
+                    if (Test-Path $candidate) { $dumpbin = $candidate }
+                }
+            }
+        }
     }
 }
 

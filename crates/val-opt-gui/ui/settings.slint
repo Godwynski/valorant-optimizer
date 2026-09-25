@@ -7,6 +7,7 @@ export component SettingsView inherits Rectangle {
     in-out property <bool> qos_dscp_enabled: true;
     in-out property <bool> bloatware_purge_enabled: true;
     in-out property <bool> services_pause_enabled: true;
+    in-out property <bool> unload_gui_on_launch: true;
 
     callback apply_all_clicked();
     callback rollback_all_clicked();
@@ -98,6 +99,18 @@ export component SettingsView inherits Rectangle {
                         Text { text: "Expedited Forwarding priority for VALORANT UDP client outbound traffic"; font-size: 11px; color: #768079; }
                     }
                     Text { text: root.qos_dscp_enabled ? "ACTIVE" : "OFF"; color: root.qos_dscp_enabled ? #00f59b : #768079; font-weight: 700; font-size: 13px; vertical-alignment: center; }
+                }
+
+                Rectangle { height: 1px; background: #273b4d; }
+
+                // Toggle 6: Ephemeral UI Unload vs Minimize
+                HorizontalLayout {
+                    alignment: space-between;
+                    VerticalLayout {
+                        Text { text: "Ephemeral UI Memory Policy"; font-size: 14px; font-weight: 600; color: #ece8e1; }
+                        Text { text: root.unload_gui_on_launch ? "Unload GUI completely on launch (0 MB RAM)" : "Keep GUI running / minimize during gameplay"; font-size: 11px; color: #768079; }
+                    }
+                    Text { text: root.unload_gui_on_launch ? "UNLOAD" : "KEEP OPEN"; color: root.unload_gui_on_launch ? #00f59b : #e5b350; font-weight: 700; font-size: 13px; vertical-alignment: center; }
                 }
             }
         }

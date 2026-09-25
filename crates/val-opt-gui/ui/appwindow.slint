@@ -27,6 +27,7 @@ export component AppWindow inherits Window {
     in-out property <string> highest_dpc_driver: "ndis.sys (79µs)";
     in-out property <string> highest_isr_driver: "Wdf01000.sys (38µs)";
     in-out property <string> test_status_msg: "Diagnostics Ready. Zero latency bottlenecks detected.";
+    in-out property <bool> unload_gui_on_launch: true;
 
     // Action Callbacks
     callback launch_clicked();
@@ -214,6 +215,7 @@ export component AppWindow inherits Window {
             }
 
             if root.active_tab == 1: SettingsView {
+                unload_gui_on_launch: root.unload_gui_on_launch;
                 apply_all_clicked => { root.apply_all_clicked(); }
                 rollback_all_clicked => { root.rollback_all_clicked(); }
             }

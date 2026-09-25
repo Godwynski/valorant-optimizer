@@ -64,23 +64,39 @@ if (-not $cert) {
 }
 
 # Step 2: Locate signtool.exe or fallback to Set-AuthenticodeSignature
-$signtoolPaths = @(
-    "C:\Program Files (x86)\Microsoft SDKs\ClickOnce\SignTool\signtool.exe",
-    "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe",
-    "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\signtool.exe",
-    "signtool.exe"
-)
-
 $signtool = $null
-foreach ($sp in $signtoolPaths) {
-    if (Test-Path $sp) {
-        $signtool = $sp
-        break
+$c = Get-Command "signtool.exe" -ErrorAction SilentlyContinue
+if ($c) {
+    $signtool = $c.Source
+} else {
+    $sdkSearch = @(
+        "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe",
+        "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe",
+        "C:\Program Files (x86)\Microsoft SDKs\ClickOnce\SignTool\signtool.exe"
+    )
+    foreach ($pattern in $sdkSearch) {
+        $resolved = Get-Item $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($resolved) {
+            $signtool = $resolved.FullName
+            break
+        }
     }
-    $c = Get-Command $sp -ErrorAction SilentlyContinue
-    if ($c) {
-        $signtool = $c.Source
-        break
+
+    if (-not $signtool) {
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        if (Test-Path $vswhere) {
+            $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+            if ($vsPath) {
+                $msvcRoot = Join-Path $vsPath "VC\Tools\MSVC"
+                if (Test-Path $msvcRoot) {
+                    $latestMsvc = Get-ChildItem $msvcRoot | Sort-Object Name -Descending | Select-Object -First 1
+                    if ($latestMsvc) {
+                        $candidate = Join-Path $latestMsvc.FullName "bin\Hostx64\x64\signtool.exe"
+                        if (Test-Path $candidate) { $signtool = $candidate }
+                    }
+                }
+            }
+        }
     }
 }
 
