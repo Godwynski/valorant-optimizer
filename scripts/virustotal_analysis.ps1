@@ -34,7 +34,7 @@ foreach ($bin in $binaries) {
         SizeKB             = [math]::Round($size / 1024, 1)
         AuthenticodeSigned = ($sig.SignatureType -eq "Authenticode")
         SHA256             = $hash
-        RiskScore          = "0/70 (Clean)"
+        VirusTotalStatus   = "UNVERIFIED (No API submission)"
         VanguardCompliant  = $true
     }
 }

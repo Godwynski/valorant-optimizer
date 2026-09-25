@@ -179,6 +179,7 @@ Write-Host "`n[4/5] Searching for Inno Setup compiler (ISCC)..." -ForegroundColo
 $isccPaths = @(
     "C:\Program Files (x86)\Inno Setup 6\iscc.exe",
     "C:\Program Files\Inno Setup 6\iscc.exe",
+    "$env:LOCALAPPDATA\Programs\Antigravity IDE\resources\app\node_modules\innosetup\bin\ISCC.exe",
     "iscc.exe"
 )
 
@@ -197,6 +198,8 @@ if ($iscc) {
     $setupPath = Join-Path $OutputDir "ValorantOptimizer_Setup_0.1.0.exe"
     if (Test-Path $setupPath) {
         $installerExe = $setupPath
+        Write-Host "Signing Inno Setup installer package..." -ForegroundColor Yellow
+        & powershell -ExecutionPolicy Bypass -File (Join-Path $WorkspaceRoot "scripts\sign_binaries.ps1") -TargetDir $OutputDir -SpecificFile "ValorantOptimizer_Setup_0.1.0.exe"
     }
 } else {
     Write-Host "Inno Setup compiler not found. Generating self-contained release zip archive..." -ForegroundColor Yellow

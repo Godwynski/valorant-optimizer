@@ -39,15 +39,15 @@ CloseApplicationsFilter=val-opt-core.exe,val-opt-gui.exe,val-opt-cli.exe
 RestartApplications=no
 MinVersion=10.0.19041
 
-; Digital Signing configuration for Inno Setup compiler
-SignTool=signtool
+; Digital Signing configuration for Inno Setup compiler (signing handled post-compilation by build_installer.ps1)
+; SignTool=signtool
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "autostart"; Description: "Start Core Optimization Daemon with Windows (Recommended)"; GroupDescription: "Daemon Configuration:"
+Name: "autostart"; Description: "Start Core Optimization Daemon on Windows startup"; GroupDescription: "Daemon Configuration:"; Flags: unchecked
 
 [Dirs]
 Name: "{commonappdata}\ValorantOptimizer"; Permissions: system-full admins-full users-readexec
@@ -66,21 +66,21 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Registry]
 ; Configure daemon startup run key if requested
-Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ValorantOptimizerDaemon"; ValueData: """{app}\{#MyCoreExeName}"" --daemon"; Tasks: autostart; Flags: uninsdeletevalue
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ValorantOptimizerDaemon"; ValueData: """{app}\{#MyCoreExeName}"""; Tasks: autostart; Flags: uninsdeletevalue
 ; Add/Remove Programs display properties
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppName}"; ValueType: string; ValueName: "DisplayIcon"; ValueData: "{app}\{#MyAppExeName},0"
 
 [Run]
-; Option to launch GUI after install completes
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+; Option to launch GUI after install completes (run as standard un-elevated user)
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
 ; CRITICAL SAFETY GATE: Guaranteed atomic rollback before files are deleted!
 ; Invokes val-opt-cli rollback to deterministically restore power scheme, audio APOs,
 ; Windows Game Mode, network properties, and QoS policies to pristine Windows baseline.
 Filename: "{app}\{#MyCliExeName}"; Parameters: "rollback"; Flags: runhidden waituntilterminated
-; Terminate any lingering daemon or GUI process
-Filename: "taskkill.exe"; Parameters: "/F /IM {#MyCoreExeName} /IM {#MyAppExeName} /T"; Flags: runhidden waituntilterminated
+; Terminate any lingering daemon or GUI process using explicit system32 path
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#MyCoreExeName} /IM {#MyAppExeName} /T"; Flags: runhidden waituntilterminated
 
 [UninstallDelete]
 ; Clean up data directories, logs, and caches

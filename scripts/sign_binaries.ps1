@@ -5,7 +5,8 @@ param (
     [string]$CertThumbprint = "",
     [string]$CertFilePath = "",
     [string]$CertPassword = "",
-    [string]$TimestampServer = "http://timestamp.digicert.com"
+    [string]$TimestampServer = "http://timestamp.digicert.com",
+    [string]$SpecificFile = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -106,12 +107,16 @@ if ($signtool) {
     Write-Host "Using PowerShell Set-AuthenticodeSignature" -ForegroundColor Green
 }
 
-# Step 3: Sign Binaries
-$binaries = @(
-    "val-opt-core.exe",
-    "val-opt-cli.exe",
-    "val-opt-gui.exe"
-)
+# Step 3: Sign Target Binaries
+$binaries = if ($SpecificFile -ne "") {
+    @($SpecificFile)
+} else {
+    @(
+        "val-opt-core.exe",
+        "val-opt-cli.exe",
+        "val-opt-gui.exe"
+    )
+}
 
 $allSigned = $true
 $signedResults = @()
@@ -148,16 +153,26 @@ foreach ($bin in $binaries) {
     $verify = Get-AuthenticodeSignature -FilePath $fullPath
     $hash = (Get-FileHash -Path $fullPath -Algorithm SHA256).Hash
 
-    $isSignedValid = ($verify.Status -eq "Valid") -or 
-                     ($verify.Status -eq "UnknownError" -and $verify.SignatureType -eq "Authenticode" -and $verify.SignerCertificate.Thumbprint -eq $cert.Thumbprint)
+    $isSelfSigned = ($cert.Subject -eq $cert.Issuer)
+    $hasSignature = ($verify.SignatureType -eq "Authenticode") -and ($verify.SignerCertificate -ne $null) -and ($verify.SignerCertificate.Thumbprint -eq $cert.Thumbprint)
+    $isTrustedRoot = ($verify.Status -eq "Valid")
+    $isSignedValid = $isTrustedRoot -or ($hasSignature -and ($verify.Status -in @("UntrustedRoot", "UnknownError")))
 
-    $statusDisplay = if ($verify.Status -eq "Valid") { "Valid (Trusted Root)" } elseif ($isSignedValid) { "Valid (Authenticode PKCS#7)" } else { $verify.Status }
+    $statusDisplay = if ($isTrustedRoot) { 
+        "Valid (Trusted CA Root)" 
+    } elseif ($hasSignature -and $isSelfSigned) { 
+        "Self-Signed (UNVERIFIED for Production)" 
+    } elseif ($hasSignature) { 
+        "Valid (Authenticode PKCS#7)" 
+    } else { 
+        $verify.Status 
+    }
 
     $signedResults += [PSCustomObject]@{
         Binary     = $bin
         Status     = $statusDisplay
-        Signer     = $verify.SignerCertificate.Subject
-        Thumbprint = $verify.SignerCertificate.Thumbprint
+        Signer     = if ($verify.SignerCertificate) { $verify.SignerCertificate.Subject } else { "N/A" }
+        Thumbprint = if ($verify.SignerCertificate) { $verify.SignerCertificate.Thumbprint } else { "N/A" }
         SHA256     = $hash.Substring(0, 16) + "..."
     }
 
@@ -171,7 +186,12 @@ Write-Host "`nAuthenticode Signature Results:" -ForegroundColor Cyan
 $signedResults | Format-Table -AutoSize
 
 if ($allSigned -and $signedResults.Count -gt 0) {
-    Write-Host "`n[SUCCESS] All production binaries digitally signed and verified with Authenticode." -ForegroundColor Green
+    $isSelfSigned = ($cert.Subject -eq $cert.Issuer)
+    if ($isSelfSigned) {
+        Write-Host "`n[NOTICE] Binaries signed with local development certificate. Production release signing status: UNVERIFIED (State B: Trusted commercial CA certificate required)." -ForegroundColor Yellow
+    } else {
+        Write-Host "`n[SUCCESS] All production binaries digitally signed and verified with Authenticode." -ForegroundColor Green
+    }
     exit 0
 } else {
     Write-Host "`n[ERROR] Not all binaries were successfully signed and validated." -ForegroundColor Red
