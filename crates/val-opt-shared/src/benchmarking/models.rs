@@ -9,11 +9,14 @@ pub struct FrameSample {
     pub frame_index: u64,
     /// Absolute timestamp in microseconds (from high-precision timer / QPC).
     pub timestamp_us: u64,
-    /// Time delta (in milliseconds) since the preceding Present call.
+    /// Time delta (in milliseconds) since the preceding Present call (Application Present Cadence / MsBetweenPresents).
+    /// Explicitly: This metric measures the interval between application Present calls.
+    /// It does not establish when a frame was actually displayed on the physical display.
     pub ms_between_presents: f64,
     /// Time delta (in milliseconds) from Present call until displayed on screen.
-    pub ms_until_displayed: f64,
-    /// Effective frame render/presentation time in milliseconds.
+    /// None when tracking Present_Start cadence (display flip queue correlation is UNVERIFIED).
+    pub ms_until_displayed: Option<f64>,
+    /// Effective application presentation interval in milliseconds (MsBetweenPresents).
     pub frame_time_ms: f64,
 }
 
@@ -53,13 +56,16 @@ impl Default for TelemetryProvenance {
     fn default() -> Self {
         Self {
             source: TelemetrySource::RealEtwPresentation,
-            collection_mechanism: "Microsoft-Windows-DXGI {CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}".to_string(),
+            collection_mechanism: "Microsoft-Windows-DXGI {CA11C036-0102-4A2D-A6AD-F03CFED5D3C9} (Present_Start Event ID 42)".to_string(),
             timestamp_source: "QueryPerformanceCounter (QPC)".to_string(),
-            unit: "Milliseconds".to_string(),
+            unit: "Milliseconds (MsBetweenPresents)".to_string(),
             is_directly_measured: true,
             sample_count: 0,
             dropped_events: 0,
-            known_limitations: Vec::new(),
+            known_limitations: vec![
+                "Measures Application Present Cadence (MsBetweenPresents). Does not establish when a frame was actually displayed on the physical display (physical display frame pacing is UNVERIFIED).".to_string(),
+                "Requires Administrator elevation or Performance Log Users group membership to establish real-time ETW session.".to_string(),
+            ],
         }
     }
 }
@@ -90,19 +96,20 @@ pub struct BenchmarkMetrics {
     pub total_frames: usize,
     /// Effective duration of analyzed frames in seconds.
     pub duration_seconds: f64,
-    /// Mean frames per second throughput.
+    /// Mean application present calls per second (Application Present Rate).
+    /// NOTE: Measures application Present cadence (MsBetweenPresents). Does not establish physical display refresh cadence.
     pub avg_fps: f64,
-    /// 1% Low FPS (calculated from 99th percentile frame-time).
+    /// 1% Low Present Cadence FPS (calculated from 99th percentile MsBetweenPresents).
     pub one_percent_low_fps: f64,
-    /// 0.1% Low FPS (calculated from 99.9th percentile frame-time).
+    /// 0.1% Low Present Cadence FPS (calculated from 99.9th percentile MsBetweenPresents).
     pub zero_point_one_percent_low_fps: f64,
-    /// Instantaneous minimum FPS.
+    /// Instantaneous minimum Present FPS.
     pub min_fps: f64,
-    /// Instantaneous maximum FPS.
+    /// Instantaneous maximum Present FPS.
     pub max_fps: f64,
-    /// Mean frame-time in milliseconds.
+    /// Mean presentation interval (MsBetweenPresents) in milliseconds.
     pub frame_time_mean_ms: f64,
-    /// Standard deviation of frame-times (frame pacing consistency metric).
+    /// Standard deviation of presentation intervals (Application Present Cadence consistency).
     pub frame_time_std_dev_ms: f64,
     /// 50th percentile (median) frame time in milliseconds.
     pub p50_frame_time_ms: f64,

@@ -29,12 +29,13 @@ Single source of truth for execution status, active phases, and project health.
   3. [RESOLVED] VALORANT game launch flow completed with ProgramData detection, URI fallback, and UI error handling (P1-03 / TASK-FUNC-03)
   4. [RESOLVED] Token-safe application relaunch and game launch de-escalation via `CreateProcessAsUserW` (P1-04 / TASK-FUNC-04)
   5. [RESOLVED] Machine-specific toolchain paths eradicated; portable `vswhere` and environment discovery enforced (P1-05 / TASK-FUNC-05)
-- **Completed Telemetry & Measurement Upgrades (P2):**
-  1. [RESOLVED] Real Windows ETW DXGI/D3D presentation ingestion engine (`EtwFrameCaptureEngine`) consuming events 42/43/44 with QPC timestamps (P2-01 / TASK-BENCH-01)
-  2. [RESOLVED] Real Windows Kernel ETW DPC/ISR tracing engine (`KernelLatencySessionManager`) consuming `NT Kernel Logger` events with driver address resolution (P2-02 / TASK-BENCH-02)
-  3. [RESOLVED] Controlled interleaved A/B benchmark harness ($A \to B \to A \to B$) with host environmental telemetry snapshotting (P2-03 / TASK-BENCH-03)
-  4. [RESOLVED] Non-parametric statistics (Mann-Whitney U, Bootstrap 95% CI) and Levene pacing variance tests with full audit provenance (P2-04, P2-05 / TASK-BENCH-04)
-  5. [RESOLVED] Telemetry overhead measured at < 0.001% CPU and isolated test fixtures strictly segregated from production paths (P2-06)
+- **Completed Telemetry & Measurement Upgrades (P2 Final Remediation):**
+  1. [RESOLVED] Option A Measurement Semantics: Explicitly narrowed to Application Present Cadence (`MsBetweenPresents`) measuring intervals between consecutive application `Present_Start` calls. Physical display frame arrival (`MsUntilDisplayed`) is marked `UNVERIFIED` and all fabricated display latency offsets (`+ 0.8ms`) have been eradicated.
+  2. [RESOLVED] Kernel Driver Isolator hardened: Synthetic driver addresses eliminated. Unverified KASLR drivers resolve strictly to `UnknownKernelRoutine` with zero fake base addresses (`test_unverified_driver_never_attributed`).
+  3. [RESOLVED] Statistical Design & Data Flow: Primary parametric analysis is Paired Student's t-test ($D_i = B_i - A_i$); Welch's t-test is designated as "Secondary independent-sample diagnostic"; paired difference bootstrap resamples matched pairs $(A_k, B_k)$ with replacement to preserve block covariance. Inferential statistical unit is $N$ independent benchmark trials ($N = 10$), never raw frame counts.
+  4. [RESOLVED] Practical Significance Threshold: Redefined strictly as "Project-defined practical significance threshold: 3%". "MCID / Minimum Clinically Important Difference" wording eradicated. Cohen's $d$ retained as separate standardized effect size.
+  5. [RESOLVED] Overhead Classification Separated: In-memory ingestion benchmark (<0.001% CPU) classified as `TEST-VERIFIED`. Live ETW capture and complete production telemetry classified as `UNVERIFIED` due to non-elevated host test environment.
+  6. [RESOLVED] All 136 workspace unit and integration tests passing with 0 failures (`cargo test --workspace`).
 
 ---
 

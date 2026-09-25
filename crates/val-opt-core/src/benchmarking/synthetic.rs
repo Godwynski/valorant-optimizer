@@ -59,7 +59,7 @@ impl MockDirectXApp {
                     frame_index: frame_idx as u64,
                     timestamp_us: cumulative_us,
                     ms_between_presents: current_frame_time_ms,
-                    ms_until_displayed: current_frame_time_ms + 0.8,
+                    ms_until_displayed: None,
                     frame_time_ms: current_frame_time_ms,
                 };
                 on_frame(sample);
@@ -105,7 +105,7 @@ impl MockDirectXApp {
                 frame_index: frame_idx as u64,
                 timestamp_us,
                 ms_between_presents: measured_ms,
-                ms_until_displayed: measured_ms + 0.8, // Typical DWM display latency offset
+                ms_until_displayed: None,
                 frame_time_ms: measured_ms,
             };
 

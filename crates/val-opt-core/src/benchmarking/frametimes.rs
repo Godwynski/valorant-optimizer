@@ -119,7 +119,7 @@ mod tests {
             frame_index: 1,
             timestamp_us: 1000,
             ms_between_presents: 4.16,
-            ms_until_displayed: 5.16,
+            ms_until_displayed: None,
             frame_time_ms: 4.16,
         });
         assert_eq!(collector.count(), 0);
@@ -132,7 +132,7 @@ mod tests {
                 frame_index: i,
                 timestamp_us: i * 4166,
                 ms_between_presents: 4.166,
-                ms_until_displayed: 5.166,
+                ms_until_displayed: None,
                 frame_time_ms: 4.166,
             });
         }
@@ -186,7 +186,7 @@ mod tests {
                 frame_index: i as u64,
                 timestamp_us: (i * 4166) as u64,
                 ms_between_presents: 4.166,
-                ms_until_displayed: 4.966,
+                ms_until_displayed: None,
                 frame_time_ms: 4.166,
             });
         }

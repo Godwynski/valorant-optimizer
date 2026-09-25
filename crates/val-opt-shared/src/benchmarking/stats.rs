@@ -388,22 +388,24 @@ pub fn compare_ab_trials(
     let optimized_pacing_std_dev = opt_pacing.iter().sum::<f64>() / (opt_pacing.len() as f64);
     let delta_pacing_std_dev_percent = ((optimized_pacing_std_dev - baseline_pacing_std_dev) / baseline_pacing_std_dev) * 100.0;
 
-    let (t_statistic, degrees_of_freedom, p_value) = welch_t_test(&base_1p, &opt_1p)?;
+    // Primary parametric analysis: Paired Student's t-test matching the interleaved block design (A_i <-> B_i)
     let (paired_t_stat, _paired_df, paired_p_value) =
         paired_t_test(&base_1p, &opt_1p).unwrap_or((0.0, (n.saturating_sub(1)) as f64, 1.0));
+    // Secondary independent-sample diagnostic using Welch's unequal-variance t-test
+    let (t_statistic, degrees_of_freedom, p_value) = welch_t_test(&base_1p, &opt_1p)?;
     let cohens_d = compute_cohens_d(&base_1p, &opt_1p);
     let (mann_whitney_u_stat, mann_whitney_p_value) = mann_whitney_u_test(&base_1p, &opt_1p).unwrap_or((0.0, 1.0));
-    let bootstrap_one_percent_ci = bootstrap_percentile_delta_ci(&base_1p, &opt_1p, 2000, 0.95).unwrap_or((0.0, 0.0));
+    let bootstrap_one_percent_ci = bootstrap_paired_percentage_delta_ci(&base_1p, &opt_1p, 2000, 0.95).unwrap_or((0.0, 0.0));
     let (levene_f_stat, levene_p_value) = levene_variance_test(&base_pacing, &opt_pacing).unwrap_or((0.0, 1.0));
     let is_variance_significantly_reduced = levene_p_value < 0.05 && optimized_pacing_std_dev < baseline_pacing_std_dev;
 
-    // Both parametric (Welch's or Paired t-test) and non-parametric tests considered for robust confirmation,
+    // Both parametric (Paired t-test primary) and non-parametric tests considered for robust confirmation,
     // and the 95% bootstrap confidence interval lower bound must strictly exclude zero (CI_low > 0.0%).
-    let is_statistically_significant = (p_value < 0.01 || paired_p_value < 0.01)
+    let is_statistically_significant = (paired_p_value < 0.01 || p_value < 0.01)
         && mann_whitney_p_value < 0.05
         && bootstrap_one_percent_ci.0 > 0.0;
 
-    // Practical significance threshold: Delta >= 3.0% (Minimum Clinically/Perceptually Important Difference)
+    // Project-defined practical significance threshold: 3% (Delta >= +3.0%)
     let meets_threshold = is_statistically_significant && (delta_one_percent_low_percent >= 3.0 || delta_avg_fps_percent >= 3.0);
 
     let recommendation = if meets_threshold {
@@ -413,7 +415,7 @@ pub fn compare_ab_trials(
         )
     } else if is_statistically_significant && delta_one_percent_low_percent > 0.0 {
         format!(
-            "BORDERLINE — Statistically significant but under 3.0% practical threshold (Delta = +{:.2}%, Cohen's d = {:.2})",
+            "BORDERLINE — Statistically significant but under 3.0% practical significance threshold (Delta = +{:.2}%, Cohen's d = {:.2})",
             delta_one_percent_low_percent, cohens_d
         )
     } else if delta_one_percent_low_percent < -1.0 {
@@ -555,6 +557,77 @@ pub fn mann_whitney_u_test(sample_a: &[f64], sample_b: &[f64]) -> Result<(f64, f
 
     let p_value = (2.0 * (1.0 - standard_normal_cdf(z.abs()))).clamp(0.0, 1.0);
     Ok((u, p_value))
+}
+
+/// Compute bootstrap confidence interval of percentage delta between paired sample populations (A_i <-> B_i).
+///
+/// Strictly preserves the paired block design by resampling matched pair indices with replacement.
+/// For each bootstrap replication:
+/// 1. Sample N pair indices k_1, ..., k_N in 0..N with replacement.
+/// 2. Compute resampled means \bar{A}^* and \bar{B}^*.
+/// 3. Compute percentage delta on resampled means: \Delta%^* = ((\bar{B}^* - \bar{A}^*) / \bar{A}^*) * 100%.
+/// 4. Extract percentile bounds [alpha/2, 1 - alpha/2].
+pub fn bootstrap_paired_percentage_delta_ci(
+    sample_a: &[f64],
+    sample_b: &[f64],
+    resamples: usize,
+    confidence_level: f64,
+) -> Result<(f64, f64), String> {
+    let n = sample_a.len();
+    if n != sample_b.len() {
+        return Err(format!(
+            "Paired bootstrap requires equal sample sizes, got {} and {}",
+            n, sample_b.len()
+        ));
+    }
+    if n < 2 {
+        return Err(format!("Paired bootstrap requires at least 2 pairs, got {}", n));
+    }
+
+    let mut deltas = Vec::with_capacity(resamples);
+    let mut rng_state: u64 = 0x9E3779B97F4A7C15;
+
+    // Xorshift64 PRNG for fast deterministic bootstrapping
+    let mut next_rand = || {
+        rng_state ^= rng_state << 13;
+        rng_state ^= rng_state >> 7;
+        rng_state ^= rng_state << 17;
+        rng_state
+    };
+
+    let n_f = n as f64;
+
+    for _ in 0..resamples {
+        let mut sum_a = 0.0;
+        let mut sum_b = 0.0;
+        for _ in 0..n {
+            let idx = (next_rand() as usize) % n;
+            sum_a += sample_a[idx];
+            sum_b += sample_b[idx];
+        }
+        let mean_a = sum_a / n_f;
+        let mean_b = sum_b / n_f;
+
+        if mean_a > 0.0 {
+            let delta_pct = ((mean_b - mean_a) / mean_a) * 100.0;
+            deltas.push(delta_pct);
+        }
+    }
+
+    if deltas.is_empty() {
+        return Ok((0.0, 0.0));
+    }
+
+    deltas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let alpha = 1.0 - confidence_level;
+    let lower_pct = (alpha / 2.0) * 100.0;
+    let upper_pct = (1.0 - alpha / 2.0) * 100.0;
+
+    let lower = calculate_percentile(&deltas, lower_pct);
+    let upper = calculate_percentile(&deltas, upper_pct);
+
+    Ok((lower, upper))
 }
 
 /// Compute 95% bootstrap confidence interval of percentage delta between sample populations.
@@ -699,7 +772,7 @@ mod tests {
                 frame_index: (i + 1) as u64,
                 timestamp_us: cur_time,
                 ms_between_presents: ft,
-                ms_until_displayed: ft + 1.0,
+                ms_until_displayed: None,
                 frame_time_ms: ft,
             });
         }
@@ -751,6 +824,22 @@ mod tests {
         assert!(ci_low > 7.0, "Lower CI must show positive gain, got {}", ci_low);
         assert!(ci_high < 13.0, "Upper CI must be bounded, got {}", ci_high);
         assert!(ci_low < ci_high, "CI bounds must be ordered: {} < {}", ci_low, ci_high);
+    }
+
+    #[test]
+    fn test_bootstrap_paired_percentage_delta_ci() {
+        // Paired data: A_i and B_i with positive within-pair delta (~10%)
+        let a = vec![100.0, 102.0, 101.0, 99.0, 100.5, 101.5];
+        let b = vec![110.0, 112.0, 111.0, 109.0, 110.5, 111.5];
+
+        let (ci_low, ci_high) = bootstrap_paired_percentage_delta_ci(&a, &b, 2000, 0.95).expect("Paired bootstrap must succeed");
+        assert!(ci_low > 8.0, "Lower CI must show positive gain, got {}", ci_low);
+        assert!(ci_high < 12.0, "Upper CI must be bounded, got {}", ci_high);
+        assert!(ci_low < ci_high, "CI bounds must be ordered: {} < {}", ci_low, ci_high);
+
+        // Mismatched lengths should error
+        let err = bootstrap_paired_percentage_delta_ci(&a, &vec![110.0], 1000, 0.95);
+        assert!(err.is_err());
     }
 
     #[test]

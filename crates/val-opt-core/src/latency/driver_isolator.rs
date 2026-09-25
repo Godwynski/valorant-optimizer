@@ -336,4 +336,25 @@ mod tests {
         let unknown_name = isolator.record_execution(unknown_addr, 200);
         assert_eq!(unknown_name, "UnknownKernelRoutine");
     }
+
+    #[test]
+    fn test_unverified_driver_never_attributed() {
+        let isolator = KernelDriverIsolator {
+            drivers: RwLock::new(vec![LoadedDriver {
+                base_address: 0,
+                name: "unverified.sys".to_string(),
+                path: r"C:\Windows\System32\drivers\unverified.sys".to_string(),
+                is_verified_base: false,
+            }]),
+            driver_stats: RwLock::new(HashMap::new()),
+        };
+
+        // Any address (even 0 or kernel range) should resolve to None
+        assert!(isolator.resolve_address(0xFFFFF80010000000u64).is_none());
+        assert!(isolator.resolve_address(0).is_none());
+
+        let name = isolator.record_execution(0xFFFFF80010000000u64, 100);
+        assert!(name.contains("UnknownKernelRoutine"));
+        assert!(!name.contains("unverified.sys"));
+    }
 }

@@ -336,13 +336,15 @@ impl ABBenchmarkRunner {
 
 ## 1. Executive Summary & Verdict
 - **Telemetry Source:** `{:?}`
+- **Measurement Target:** Application Present Cadence (`MsBetweenPresents`)
+- **Physical Display Frame Pacing:** UNVERIFIED (Requires DWM hardware flip queue / VSync correlation)
 - **Experimental Design:** Interleaved Paired Trials ($A_1 \to B_1 \to A_2 \to B_2 \dots$)
 - **Sample Unit:** Independent trial-level aggregates ($N = {}$ matched pairs)
 - **Standardized Effect Size (Cohen's d):** **{:.2}** (pooled within-group SD)
-- **Paired Student's t-test ($D_i = B_i - A_i$):** t = {:.4}, p = {:.6} (df = {})
-- **Independent Welch's t-test:** t = {:.4}, p = {:.6} (df = {:.1})
-- **Non-Parametric Mann-Whitney U Test:** U = {:.1}, p = {:.6}
-- **Bootstrap 95% Confidence Interval (1% Low Delta):** [{:+.2}%, {:+.2}%]
+- **Primary Parametric Analysis (Paired Student's t-test, $D_i = B_i - A_i$):** t = {:.4}, p = {:.6} (df = {})
+- **Secondary Independent-Sample Diagnostic (Welch's t-test):** t = {:.4}, p = {:.6} (df = {:.1})
+- **Non-Parametric Diagnostic (Mann-Whitney U Test):** U = {:.1}, p = {:.6}
+- **Paired Difference Bootstrap 95% Confidence Interval (1% Low Delta):** [{:+.2}%, {:+.2}%]
 - **Levene Pacing Variance Test:** F = {:.4}, p = {:.6}
 - **Pacing Variance Significantly Reduced:** **{}**
 - **Statistically Significant ($\alpha = 0.01$, CI > 0%):** **{}**
@@ -351,14 +353,14 @@ impl ABBenchmarkRunner {
 
 ---
 
-## 2. Statistical Metric Comparisons
+## 2. Statistical Metric Comparisons (Application Present Cadence)
 
 | Metric | Stock Baseline | Optimized Profile | Absolute Delta | Percentage Delta |
 | :--- | :--- | :--- | :--- | :--- |
-| **Average FPS** | {:.2} FPS | {:.2} FPS | {:+.2} FPS | {:+.2}% |
-| **1% Low FPS (99th %ile)** | {:.2} FPS | {:.2} FPS | {:+.2} FPS | {:+.2}% |
-| **0.1% Low FPS (99.9th %ile)** | {:.2} FPS | {:.2} FPS | {:+.2} FPS | {:+.2}% |
-| **Frame-time Std Dev ($\sigma$)** | {:.3} ms | {:.3} ms | {:+.3} ms | {:+.2}% |
+| **Average Present Rate (FPS)** | {:.2} FPS | {:.2} FPS | {:+.2} FPS | {:+.2}% |
+| **1% Low Present Rate (99th %ile)** | {:.2} FPS | {:.2} FPS | {:+.2} FPS | {:+.2}% |
+| **0.1% Low Present Rate (99.9th %ile)** | {:.2} FPS | {:.2} FPS | {:+.2} FPS | {:+.2}% |
+| **Present Cadence Std Dev ($\sigma$)** | {:.3} ms | {:.3} ms | {:+.3} ms | {:+.2}% |
 
 ---
 

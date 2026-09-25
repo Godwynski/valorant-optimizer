@@ -4,14 +4,15 @@
 //! with sub-microsecond precision and ZERO DLL injection into the game process.
 //!
 //! ### Consumed ETW Providers & Events
-//! - **Microsoft-Windows-DXGI** (`{CA11C060-6729-4DA2-B236-B7E3E7F93F11}`)
-//!   - Event 42: `DXGIPresent_Start` (Opcode 1)
-//!   - Event 43: `DXGIPresent_Stop` (Opcode 2)
+//! - **Microsoft-Windows-DXGI** (`{CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}`)
+//!   - Event 42: `DXGIPresent_Start` (Opcode 1, Task 9)
+//!   - Event 43: `DXGIPresent_Stop` (Opcode 2, Task 9)
 //!   - Event 44: `DXGIPresent_Info`
-//! - **Microsoft-Windows-D3D9** (`{7802F644-CF7B-4615-BCD6-379763BC7E0B}`)
-//!   - Event 1: `Present_Start`
-//!   - Event 2: `Present_Stop`
-//! - **Microsoft-Windows-Dwm-Core** (`{9E9B37E1-C80B-47C1-9730-1744C5DE7F66}`)
+//! - **Microsoft-Windows-D3D9** (`{783ACA0A-790E-4D7F-8451-AA850511C6B9}`)
+//!   - Event 1: `Present_Start` (Opcode 1)
+//!   - Event 2: `Present_Stop` (Opcode 2)
+//! - **Microsoft-Windows-Dwm-Core** (`{9E9BBA3C-2E38-40CB-99F4-9E8281425164}`)
+//!   - Used for desktop composition flip queue tracking (UNVERIFIED / Not currently hooked in Option A)
 
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -40,9 +41,9 @@ pub const DXGI_PROVIDER_GUID: windows::core::GUID =
 pub const D3D9_PROVIDER_GUID: windows::core::GUID =
     windows::core::GUID::from_u128(0x783ACA0A_790E_4D7F_8451_AA850511C6B9);
 
-/// Microsoft-Windows-Dwm-Core Provider GUID: {9E9B37E1-C80B-47C1-9730-1744C5DE7F66}
+/// Microsoft-Windows-Dwm-Core Provider GUID: {9E9BBA3C-2E38-40CB-99F4-9E8281425164}
 pub const DWM_CORE_PROVIDER_GUID: windows::core::GUID =
-    windows::core::GUID::from_u128(0x9E9B37E1_C80B_47C1_9730_1744C5DE7F66);
+    windows::core::GUID::from_u128(0x9E9BBA3C_2E38_40CB_99F4_9E8281425164);
 
 pub const DXGI_PRESENT_START_EVENT_ID: u16 = 42;
 pub const DXGI_PRESENT_STOP_EVENT_ID: u16 = 43;
@@ -244,7 +245,7 @@ impl EtwFrameCaptureEngine {
                         frame_index: frame_idx,
                         timestamp_us: ts_us,
                         ms_between_presents: frame_time_ms,
-                        ms_until_displayed: frame_time_ms + 0.8,
+                        ms_until_displayed: None,
                         frame_time_ms,
                     });
                 } else {
@@ -470,15 +471,15 @@ impl EtwFrameCaptureEngine {
         let snapshot = self.collector.snapshot();
         let provenance = TelemetryProvenance {
             source: TelemetrySource::RealEtwPresentation,
-            collection_mechanism: "Microsoft-Windows-DXGI {CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}, Microsoft-Windows-D3D9 {783ACA0A-790E-4D7F-8451-AA850511C6B9}".to_string(),
+            collection_mechanism: "Microsoft-Windows-DXGI {CA11C036-0102-4A2D-A6AD-F03CFED5D3C9} (Present_Start Event ID 42), Microsoft-Windows-D3D9 {783ACA0A-790E-4D7F-8451-AA850511C6B9} (Present_Start Event ID 1)".to_string(),
             timestamp_source: "QueryPerformanceCounter (QPC)".to_string(),
-            unit: "Milliseconds".to_string(),
+            unit: "Milliseconds (MsBetweenPresents)".to_string(),
             is_directly_measured: true,
             sample_count: snapshot.len(),
             dropped_events: self.dropped_events.load(Ordering::Relaxed),
             known_limitations: vec![
+                "Measures Application Present Cadence (MsBetweenPresents). Does not establish when a frame was actually displayed on the physical display (physical display frame pacing is UNVERIFIED).".to_string(),
                 "Requires Administrator elevation or Performance Log Users group membership to establish real-time ETW session.".to_string(),
-                "DWM composited windowed presentations may incur a constant +0.8ms display latency offset compared to exclusive fullscreen.".to_string(),
             ],
         };
 
@@ -533,7 +534,7 @@ mod tests {
             frame_index: 1,
             timestamp_us: 1000,
             ms_between_presents: 4.166,
-            ms_until_displayed: 4.966,
+            ms_until_displayed: None,
             frame_time_ms: 4.166,
         });
 
