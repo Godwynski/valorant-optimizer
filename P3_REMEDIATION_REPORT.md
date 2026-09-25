@@ -233,7 +233,7 @@ All security, functional, and telemetry controls established in previous phases 
 - **Portable Toolchain Discovery:** Visual Studio toolchain paths are discovered dynamically via `vswhere.exe`.
 
 ### P2 Real Measurement & Telemetry Controls:
-- **Genuine Windows ETW Presentation Capture:** Uses official Microsoft-Windows-DXGI (`{CA11C036-0102-4A2D-A6AD-EE898B31EC52}`) Event 42 (`Present_Start`) and Event 43 (`Present_Stop`), Microsoft-Windows-D3D9 (`{783CD224-8588-42F5-950F-7E797A7DF566}`), and NT Kernel Logger without synthetic data injection.
+- **Genuine Windows ETW Presentation Capture:** Uses official Microsoft-Windows-DXGI (`{CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}`) Event 42 (`Present_Start`) and Event 43 (`Present_Stop`), Microsoft-Windows-D3D9 (`{783ACA0A-790E-4D7F-8451-AA850511C6B9}`), and NT Kernel Logger without synthetic data injection.
 - **Cadence Measurement Semantics:** Frame-time intervals are strictly defined as Application Present Cadence (`MsBetweenPresents`) between consecutive application `Present_Start` QPC timestamps.
 - **Physical Display Timing Classification:** Display scanout / VSync delivery is explicitly classified as `UNVERIFIED`; fabricated offsets have been eliminated.
 - **Kernel DPC/ISR Telemetry:** QPC duration measurements for kernel routines are captured directly from kernel events; unresolved addresses resolve to `UnknownKernelRoutine`.
