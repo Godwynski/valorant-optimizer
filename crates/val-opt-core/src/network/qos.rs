@@ -19,6 +19,20 @@ pub const VALORANT_UDP_PORT_START: u16 = 7000;
 pub const VALORANT_UDP_PORT_END: u16 = 8000;
 pub const DSCP_EXPEDITED_FORWARDING: u8 = 46;
 
+/// Validates a QoS policy name according to strict allowlist:
+/// Only allows ASCII alphanumeric characters, underscores, and hyphens. Length 1..=128.
+pub fn validate_policy_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.len() > 128 {
+        return Err("QoS policy name must be between 1 and 128 characters".to_string());
+    }
+    for c in name.chars() {
+        if !c.is_ascii_alphanumeric() && c != '_' && c != '-' {
+            return Err(format!("Invalid character '{}' in QoS policy name: {}", c, name));
+        }
+    }
+    Ok(())
+}
+
 /// Raw JSON representation of a Windows NetQosPolicy from PowerShell.
 #[derive(serde::Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
@@ -37,13 +51,16 @@ struct NetQosPolicyRaw {
 
 /// Query an existing QoS policy by name.
 pub fn query_qos_policy(policy_name: &str) -> Result<Option<QosPolicyInfo>, String> {
-    let script = format!(
-        "Get-NetQosPolicy -Name '{}' -ErrorAction SilentlyContinue | Select-Object Name, AppPathName, IPProtocol, IPDstPortStart, IPDstPortEnd, DSCPValue | ConvertTo-Json -Compress",
-        policy_name.replace('\'', "''")
-    );
+    validate_policy_name(policy_name)?;
 
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+    // Constant script block — input passed strictly via process environment variable
+    const QUERY_SCRIPT: &str = "Get-NetQosPolicy -Name $env:VAL_OPT_POLICY_NAME -ErrorAction SilentlyContinue | Select-Object Name, AppPathName, IPProtocol, IPDstPortStart, IPDstPortEnd, DSCPValue | ConvertTo-Json -Compress";
+
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", QUERY_SCRIPT]);
+    cmd.env("VAL_OPT_POLICY_NAME", policy_name);
+
+    let output = cmd
         .output()
         .map_err(|e| format!("Failed to query QoS policy: {}", e))?;
 
@@ -67,129 +84,59 @@ pub fn query_qos_policy(policy_name: &str) -> Result<Option<QosPolicyInfo>, Stri
     Ok(None)
 }
 
-/// Check and configure the Windows TCP/IP QoS NLA registry setting.
-/// Returns the previous setting value (or None if nonexistent).
-fn configure_nla_bypass() -> Result<Option<String>, String> {
-    let check_script = r#"(Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\QoS' -ErrorAction SilentlyContinue).'Do not use NLA'"#;
-    let check_out = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", check_script])
-        .output()
-        .map_err(|e| format!("Failed to query QoS NLA registry state: {}", e))?;
-
-    let prev_val = String::from_utf8_lossy(&check_out.stdout).trim().to_string();
-    let previous_setting = if prev_val.is_empty() {
-        None
-    } else {
-        Some(prev_val)
-    };
-
-    let set_script = r#"
-        $path = 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\QoS'
-        if (-not (Test-Path $path)) {
-            New-Item -Path $path -Force | Out-Null
-        }
-        Set-ItemProperty -Path $path -Name 'Do not use NLA' -Value '1' -Type String -Force
-    "#;
-
-    let set_out = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", set_script])
-        .output()
-        .map_err(|e| format!("Failed to set QoS NLA bypass registry key: {}", e))?;
-
-    if !set_out.status.success() {
-        let err = String::from_utf8_lossy(&set_out.stderr);
-        return Err(format!("Failed to configure QoS NLA bypass: {}", err.trim()));
-    }
-
-    info!("Configured Windows TCP/IP QoS NLA bypass ('Do not use NLA' = 1)");
-    Ok(previous_setting)
-}
-
-/// Restore the Windows TCP/IP QoS NLA registry setting.
+/// Restore the Windows TCP/IP QoS NLA registry setting without string interpolation.
 fn restore_nla_setting(previous_setting: Option<&str>) -> Result<(), String> {
-    let script = match previous_setting {
-        Some(val) => format!(
-            "Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\QoS' -Name 'Do not use NLA' -Value '{}' -Force -ErrorAction SilentlyContinue",
-            val.replace('\'', "''")
-        ),
-        None => "Remove-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\QoS' -Name 'Do not use NLA' -Force -ErrorAction SilentlyContinue".to_string(),
-    };
-
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output();
+    match previous_setting {
+        Some(val) => {
+            // Validate value is purely alphanumeric
+            if !val.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return Err("Invalid NLA setting value".to_string());
+            }
+            const SET_NLA: &str = "Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\QoS' -Name 'Do not use NLA' -Value $env:VAL_OPT_NLA_VAL -Force -ErrorAction SilentlyContinue";
+            let mut cmd = Command::new("powershell");
+            cmd.args(["-NoProfile", "-NonInteractive", "-Command", SET_NLA]);
+            cmd.env("VAL_OPT_NLA_VAL", val);
+            let _ = cmd.output();
+        }
+        None => {
+            const REMOVE_NLA: &str = "Remove-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\QoS' -Name 'Do not use NLA' -Force -ErrorAction SilentlyContinue";
+            let _ = Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", REMOVE_NLA])
+                .output();
+        }
+    }
 
     info!("Restored Windows TCP/IP QoS NLA registry setting");
     Ok(())
 }
 
-/// Register a high-priority DSCP 46 QoS policy for VALORANT outbound UDP packets.
-/// Returns a `QosPolicyBackup` for rollback.
+/// Register QoS policy: De-scoped under TASK-SEC-01 / TASK-OPT-02.
+/// New-NetQosPolicy creation is omitted to prevent injection risks, home router DSCP stripping,
+/// and carrier policer packet dropping.
 pub fn register_valorant_qos_policy() -> Result<QosPolicyBackup, String> {
-    if !crate::network::adapter::is_elevation_available() {
-        return Err("Administrator elevation required to register Windows QoS policies.".to_string());
-    }
-
-    let existing_policy = query_qos_policy(DEFAULT_VALORANT_QOS_POLICY_NAME)?;
-    let was_present = existing_policy.is_some();
-
-    // If already exists, remove it first to re-register cleanly
-    if was_present {
-        let remove_script = format!(
-            "Remove-NetQosPolicy -Name '{}' -Confirm:$false -ErrorAction SilentlyContinue",
-            DEFAULT_VALORANT_QOS_POLICY_NAME
-        );
-        let _ = Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &remove_script])
-            .output();
-    }
-
-    let prev_nla = configure_nla_bypass()?;
-
-    let create_script = format!(
-        "New-NetQosPolicy -Name '{}' -AppPathNameMatchCondition '{}' -IPProtocolMatchCondition UDP -IPDstPortStartMatchCondition {} -IPDstPortEndMatchCondition {} -DSCPAction {} -NetworkProfile All -ErrorAction Stop",
-        DEFAULT_VALORANT_QOS_POLICY_NAME,
-        VALORANT_PROCESS_NAME,
-        VALORANT_UDP_PORT_START,
-        VALORANT_UDP_PORT_END,
-        DSCP_EXPEDITED_FORWARDING
-    );
-
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &create_script])
-        .output()
-        .map_err(|e| format!("Failed to execute New-NetQosPolicy: {}", e))?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Failed to register QoS policy: {}", err.trim()));
-    }
-
     info!(
-        policy = DEFAULT_VALORANT_QOS_POLICY_NAME,
-        app = VALORANT_PROCESS_NAME,
-        ports = "7000-8000",
-        dscp = DSCP_EXPEDITED_FORWARDING,
-        "Successfully registered Windows QoS DSCP 46 policy"
+        "QoS DSCP policy creation omitted (de-scoped per TASK-SEC-01 / TASK-OPT-02 for carrier packet drop mitigation)"
     );
 
     Ok(QosPolicyBackup {
         policy_name: DEFAULT_VALORANT_QOS_POLICY_NAME.to_string(),
-        previous_nla_setting: prev_nla,
-        was_policy_present_before: was_present,
+        previous_nla_setting: None,
+        was_policy_present_before: false,
     })
 }
 
 /// Unregister the QoS policy and restore previous TCP/IP QoS settings.
+/// Strictly parameterizes PowerShell execution via environment variables without string interpolation.
 pub fn unregister_qos_policy(backup: &QosPolicyBackup) -> Result<(), String> {
+    validate_policy_name(&backup.policy_name)?;
+
     if !backup.was_policy_present_before {
-        let remove_script = format!(
-            "Remove-NetQosPolicy -Name '{}' -Confirm:$false -ErrorAction SilentlyContinue",
-            backup.policy_name
-        );
-        let output = Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &remove_script])
-            .output();
+        const REMOVE_SCRIPT: &str = "Remove-NetQosPolicy -Name $env:VAL_OPT_POLICY_NAME -Confirm:$false -ErrorAction SilentlyContinue";
+        let mut cmd = Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", REMOVE_SCRIPT]);
+        cmd.env("VAL_OPT_POLICY_NAME", &backup.policy_name);
+
+        let output = cmd.output();
 
         if let Ok(out) = output {
             if out.status.success() {
@@ -235,12 +182,39 @@ mod tests {
     }
 
     #[test]
-    fn test_elevation_guard() {
-        let elevated = crate::network::adapter::is_elevation_available();
-        if !elevated {
-            let res = register_valorant_qos_policy();
-            assert!(res.is_err());
-            assert!(res.unwrap_err().contains("Administrator elevation"));
-        }
+    fn test_validate_policy_name_valid() {
+        assert!(validate_policy_name("VALORANT_QoS_Optimized").is_ok());
+        assert!(validate_policy_name("Policy-123_Test").is_ok());
+    }
+
+    #[test]
+    fn test_validate_policy_name_injection_payloads() {
+        // Breakouts with quotes, semicolons, subexpressions
+        assert!(validate_policy_name("VALORANT'; Start-Process calc.exe; '").is_err());
+        assert!(validate_policy_name("Policy$(whoami)").is_err());
+        assert!(validate_policy_name("Policy | Out-File C:\\pwn.txt").is_err());
+        assert!(validate_policy_name("Policy`ncalc.exe").is_err());
+        assert!(validate_policy_name("Policy & calc.exe").is_err());
+        assert!(validate_policy_name("").is_err());
+
+        // Calling query_qos_policy with injection payload returns Err immediately
+        assert!(query_qos_policy("VALORANT'; Start-Process calc.exe; '").is_err());
+
+        // Calling unregister_qos_policy with injection payload returns Err immediately
+        let malicious_backup = QosPolicyBackup {
+            policy_name: "VALORANT'; Start-Process calc.exe; '".to_string(),
+            previous_nla_setting: None,
+            was_policy_present_before: false,
+        };
+        assert!(unregister_qos_policy(&malicious_backup).is_err());
+    }
+
+    #[test]
+    fn test_register_qos_policy_descaled() {
+        let res = register_valorant_qos_policy();
+        assert!(res.is_ok());
+        let backup = res.unwrap();
+        assert_eq!(backup.policy_name, DEFAULT_VALORANT_QOS_POLICY_NAME);
+        assert!(!backup.was_policy_present_before);
     }
 }

@@ -79,11 +79,36 @@ $DataPath = "$env:ProgramData\ValorantOptimizer"
 if (-not (Test-Path $InstallPath)) { New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null }
 if (-not (Test-Path $DataPath)) { New-Item -ItemType Directory -Path $DataPath -Force | Out-Null }
 
-# Grant Users read/write access to ProgramData
-$acl = Get-Acl $DataPath
-$rule = New-Object System.Security.AccessControl.FileSystemAccessRule("Users", "Modify, Synchronize", "ContainerInherit, ObjectInherit", "None", "Allow")
-$acl.AddAccessRule($rule)
+# Harden ProgramData directory ACL: SYSTEM (Full), Administrators (Full), Users (ReadAndExecute only)
+# Block inheritance to prevent unprivileged write access from parent directory (TASK-SEC-02)
+$acl = New-Object System.Security.AccessControl.DirectorySecurity
+$acl.SetAccessRuleProtection($true, $false)
+$adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    [System.Security.Principal.SecurityIdentifier]::new([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null),
+    "FullControl",
+    "ContainerInherit, ObjectInherit",
+    "None",
+    "Allow"
+)
+$systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    [System.Security.Principal.SecurityIdentifier]::new([System.Security.Principal.WellKnownSidType]::LocalSystemSid, $null),
+    "FullControl",
+    "ContainerInherit, ObjectInherit",
+    "None",
+    "Allow"
+)
+$usersRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    [System.Security.Principal.SecurityIdentifier]::new([System.Security.Principal.WellKnownSidType]::BuiltinUsersSid, $null),
+    "ReadAndExecute",
+    "ContainerInherit, ObjectInherit",
+    "None",
+    "Allow"
+)
+$acl.AddAccessRule($systemRule)
+$acl.AddAccessRule($adminRule)
+$acl.AddAccessRule($usersRule)
 Set-Acl $DataPath $acl
+
 
 $binaries = @("val-opt-core.exe", "val-opt-cli.exe", "val-opt-gui.exe")
 foreach ($bin in $binaries) {

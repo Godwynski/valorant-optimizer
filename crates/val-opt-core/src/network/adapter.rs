@@ -27,6 +27,42 @@ pub const GREEN_ETHERNET_KEYWORDS: &[&str] = &[
 /// Target registry keyword for Interrupt Moderation.
 pub const INTERRUPT_MODERATION_KEYWORD: &str = "*InterruptModeration";
 
+/// Validates an adapter identifier or registry keyword according to strict allowlist:
+/// Only allows ASCII alphanumeric, underscores, hyphens, periods, asterisks, spaces, and parentheses.
+pub fn validate_adapter_identifier(input: &str) -> Result<(), String> {
+    if input.is_empty() || input.len() > 256 {
+        return Err("Adapter identifier must be between 1 and 256 characters".to_string());
+    }
+    for c in input.chars() {
+        if !c.is_ascii_alphanumeric()
+            && c != '_'
+            && c != '-'
+            && c != '.'
+            && c != '*'
+            && c != ' '
+            && c != '('
+            && c != ')'
+        {
+            return Err(format!("Invalid character '{}' in adapter identifier: {}", c, input));
+        }
+    }
+    Ok(())
+}
+
+/// Validates a registry property value:
+/// Only allows ASCII alphanumeric, underscores, hyphens, periods, and spaces.
+pub fn validate_property_value(value: &str) -> Result<(), String> {
+    if value.len() > 256 {
+        return Err("Property value exceeds maximum length of 256 characters".to_string());
+    }
+    for c in value.chars() {
+        if !c.is_ascii_alphanumeric() && c != '_' && c != '-' && c != '.' && c != ' ' {
+            return Err(format!("Invalid character '{}' in property value: {}", c, value));
+        }
+    }
+    Ok(())
+}
+
 /// Helper to check if current process has administrative elevation.
 pub fn is_elevation_available() -> bool {
     crate::benchmarking::EtwFrameCaptureEngine::is_elevation_available()
@@ -34,13 +70,16 @@ pub fn is_elevation_available() -> bool {
 
 /// Query all advanced properties for the specified network adapter name.
 pub fn query_adapter_properties(adapter_name: &str) -> Result<Vec<NicAdvancedProperty>, String> {
-    let script = format!(
-        "@(Get-NetAdapterAdvancedProperty -Name '{}' -ErrorAction Stop) | Select-Object DisplayName, RegistryKeyword, RegistryValue | ConvertTo-Json -Compress",
-        adapter_name.replace('\'', "''")
-    );
+    validate_adapter_identifier(adapter_name)?;
 
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+    // Constant script block — input passed strictly via process environment variable
+    const QUERY_SCRIPT: &str = "@(Get-NetAdapterAdvancedProperty -Name $env:VAL_OPT_ADAPTER -ErrorAction Stop) | Select-Object DisplayName, RegistryKeyword, RegistryValue | ConvertTo-Json -Compress";
+
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", QUERY_SCRIPT]);
+    cmd.env("VAL_OPT_ADAPTER", adapter_name);
+
+    let output = cmd
         .output()
         .map_err(|e| format!("Failed to execute PowerShell adapter query: {}", e))?;
 
@@ -69,6 +108,9 @@ pub fn query_property(
     adapter_name: &str,
     keyword: &str,
 ) -> Result<Option<NicAdvancedProperty>, String> {
+    validate_adapter_identifier(adapter_name)?;
+    validate_adapter_identifier(keyword)?;
+
     let props = query_adapter_properties(adapter_name)?;
     Ok(props
         .into_iter()
@@ -81,6 +123,10 @@ pub fn set_adapter_property(
     keyword: &str,
     value: &str,
 ) -> Result<(), String> {
+    validate_adapter_identifier(adapter_name)?;
+    validate_adapter_identifier(keyword)?;
+    validate_property_value(value)?;
+
     if !is_elevation_available() {
         return Err(
             "Administrator elevation required to modify network adapter advanced properties."
@@ -88,15 +134,16 @@ pub fn set_adapter_property(
         );
     }
 
-    let script = format!(
-        "Set-NetAdapterAdvancedProperty -Name '{}' -RegistryKeyword '{}' -RegistryValue '{}' -NoRestart -ErrorAction Stop",
-        adapter_name.replace('\'', "''"),
-        keyword.replace('\'', "''"),
-        value.replace('\'', "''")
-    );
+    // Constant script block — inputs passed strictly via process environment variables
+    const SET_SCRIPT: &str = "Set-NetAdapterAdvancedProperty -Name $env:VAL_OPT_ADAPTER -RegistryKeyword $env:VAL_OPT_KEYWORD -RegistryValue $env:VAL_OPT_VALUE -NoRestart -ErrorAction Stop";
 
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", SET_SCRIPT]);
+    cmd.env("VAL_OPT_ADAPTER", adapter_name);
+    cmd.env("VAL_OPT_KEYWORD", keyword);
+    cmd.env("VAL_OPT_VALUE", value);
+
+    let output = cmd
         .output()
         .map_err(|e| format!("Failed to execute Set-NetAdapterAdvancedProperty: {}", e))?;
 
@@ -122,13 +169,16 @@ pub fn set_adapter_property(
 
 /// Query the link status of the specified network adapter (e.g. "Up", "Disconnected").
 pub fn query_adapter_link_status(adapter_name: &str) -> Result<String, String> {
-    let script = format!(
-        "(Get-NetAdapter -Name '{}' -ErrorAction Stop).Status",
-        adapter_name.replace('\'', "''")
-    );
+    validate_adapter_identifier(adapter_name)?;
 
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+    // Constant script block — input passed strictly via process environment variable
+    const STATUS_SCRIPT: &str = "(Get-NetAdapter -Name $env:VAL_OPT_ADAPTER -ErrorAction Stop).Status";
+
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", STATUS_SCRIPT]);
+    cmd.env("VAL_OPT_ADAPTER", adapter_name);
+
+    let output = cmd
         .output()
         .map_err(|e| format!("Failed to query adapter status: {}", e))?;
 
@@ -294,4 +344,54 @@ mod tests {
         println!("Adapter config elevation available: {}", elevated);
         // Ensure function runs cleanly without panic
     }
+
+    #[test]
+    fn test_validate_adapter_identifier_valid() {
+        assert!(validate_adapter_identifier("Ethernet").is_ok());
+        assert!(validate_adapter_identifier("Wi-Fi").is_ok());
+        assert!(validate_adapter_identifier("Realtek PCIe GbE Family Controller").is_ok());
+        assert!(validate_adapter_identifier("Intel(R) Ethernet Connection (7) I219-V").is_ok());
+        assert!(validate_adapter_identifier("vEthernet (Default Switch)").is_ok());
+        assert!(validate_adapter_identifier("*EEE").is_ok());
+        assert!(validate_adapter_identifier("*InterruptModeration").is_ok());
+    }
+
+    #[test]
+    fn test_validate_adapter_identifier_rejection_of_injection_payloads() {
+        // Semicolon / command chaining
+        assert!(validate_adapter_identifier("Ethernet; Start-Process calc.exe").is_err());
+        assert!(query_adapter_properties("Ethernet; Start-Process calc.exe").is_err());
+        assert!(query_adapter_link_status("Ethernet; Start-Process calc.exe").is_err());
+
+        // Subexpression / variable expansion
+        assert!(validate_adapter_identifier("Ethernet$(whoami)").is_err());
+        assert!(validate_adapter_identifier("Ethernet`ncalc.exe").is_err());
+
+        // Single / double quote breakout
+        assert!(validate_adapter_identifier("Ethernet' -or 1 -eq 1").is_err());
+        assert!(validate_adapter_identifier("Ethernet\"").is_err());
+
+        // Pipe / redirection
+        assert!(validate_adapter_identifier("Ethernet | Out-File C:\\pwn.txt").is_err());
+        assert!(validate_adapter_identifier("Ethernet > C:\\pwn.txt").is_err());
+        assert!(validate_adapter_identifier("Ethernet & calc.exe").is_err());
+
+        // Newlines and control characters
+        assert!(validate_adapter_identifier("Ethernet\r\nStart-Process calc").is_err());
+
+        // Empty string
+        assert!(validate_adapter_identifier("").is_err());
+    }
+
+    #[test]
+    fn test_validate_property_value_rejection_of_injection_payloads() {
+        assert!(validate_property_value("0").is_ok());
+        assert!(validate_property_value("1").is_ok());
+        assert!(validate_property_value("Disabled").is_ok());
+        assert!(validate_property_value("Rx & Tx Enabled").is_err()); // ampersand rejected
+        assert!(validate_property_value("0; Stop-Service vgk").is_err());
+        assert!(validate_property_value("$(calc)").is_err());
+        assert!(validate_property_value("1' OR '1'='1").is_err());
+    }
 }
+

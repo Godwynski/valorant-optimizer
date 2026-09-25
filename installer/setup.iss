@@ -50,7 +50,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "autostart"; Description: "Start Core Optimization Daemon with Windows (Recommended)"; GroupDescription: "Daemon Configuration:"
 
 [Dirs]
-Name: "{commonappdata}\ValorantOptimizer"; Permissions: users-modify
+Name: "{commonappdata}\ValorantOptimizer"; Permissions: system-full admins-full users-readexec
 
 [Files]
 ; Main Executables (Pre-hardened with ASLR, DEP/NX, CFG and Authenticode signed)

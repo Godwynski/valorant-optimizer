@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use val_opt_shared::ipc::{decode_message, encode_message, IpcRequest, IpcResponse, VAL_OPT_PIPE_NAME};
 
 /// The unified IPC server hosting the Windows Named Pipe.
@@ -27,8 +27,30 @@ impl IpcServer {
         }
     }
 
-    /// Process a single incoming IPC request and dispatch to corresponding subsystems.
+    /// Process a single incoming IPC request assuming administrative privileges (e.g. for in-process callers).
     pub fn handle_request(request: IpcRequest) -> IpcResponse {
+        Self::handle_request_authorized(request, true)
+    }
+
+    /// Process an IPC request verifying caller elevation status for sensitive operations (TASK-SEC-03).
+    pub fn handle_request_authorized(request: IpcRequest, is_client_elevated: bool) -> IpcResponse {
+        // High-privilege requests require elevation
+        let is_privileged = matches!(
+            request,
+            IpcRequest::ApplyOptimizations
+                | IpcRequest::RollbackOptimizations
+                | IpcRequest::PurgeBloatware
+                | IpcRequest::ShutdownDaemon
+                | IpcRequest::LaunchOptimizedGame { .. }
+        );
+
+        if is_privileged && !is_client_elevated {
+            return IpcResponse::Error {
+                code: "UNAUTHORIZED".to_string(),
+                message: "Administrative privileges required to execute this operation".to_string(),
+            };
+        }
+
         match request {
             IpcRequest::Ping => IpcResponse::Pong,
 
@@ -162,13 +184,81 @@ impl IpcServer {
         }
     }
 
+    /// Constructs a hardened Windows Security Descriptor from SDDL for the IPC named pipe (TASK-SEC-03).
+    /// SDDL: D:(A;;GRGW;;;AU)(A;;GA;;;BA)(A;;GA;;;SY)
+    /// - AU (Authenticated Users): Read/Write (message exchange)
+    /// - BA (Builtin Administrators): Full Control
+    /// - SY (Local System): Full Control
+    /// Denies remote, anonymous, and unauthenticated network access.
+    #[cfg(windows)]
+    pub fn build_named_pipe_security_attributes() -> Result<(windows::Win32::Security::SECURITY_ATTRIBUTES, windows::Win32::Security::PSECURITY_DESCRIPTOR), String> {
+        use windows::core::HSTRING;
+        use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
+        use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+
+        let sddl = HSTRING::from("D:(A;;GRGW;;;AU)(A;;GA;;;BA)(A;;GA;;;SY)");
+        let mut p_sd = PSECURITY_DESCRIPTOR::default();
+
+        unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                &sddl,
+                SDDL_REVISION_1,
+                &mut p_sd,
+                None,
+            ).map_err(|e| format!("Failed to create security descriptor from SDDL: {}", e))?;
+        }
+
+        let sa = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: p_sd.0,
+            bInheritHandle: false.into(),
+        };
+
+        Ok((sa, p_sd))
+    }
+
+    /// Verifies if the connected named pipe client process has administrative elevation (TASK-SEC-03).
+    #[cfg(windows)]
+    pub fn is_client_elevated(pipe_handle: windows::Win32::Foundation::HANDLE) -> bool {
+        use windows::Win32::Security::{GetTokenInformation, RevertToSelf, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+
+        use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
+        use windows::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
+
+        unsafe {
+            if ImpersonateNamedPipeClient(pipe_handle).is_ok() {
+                let mut thread_token = windows::Win32::Foundation::HANDLE::default();
+                let mut is_elevated = false;
+
+                if OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &mut thread_token).is_ok() {
+                    let mut elevation = TOKEN_ELEVATION::default();
+                    let mut return_length = 0u32;
+                    if GetTokenInformation(
+                        thread_token,
+                        TokenElevation,
+                        Some(&mut elevation as *mut _ as *mut _),
+                        std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+                        &mut return_length,
+                    ).is_ok() {
+                        is_elevated = elevation.TokenIsElevated != 0;
+                    }
+                    let _ = windows::Win32::Foundation::CloseHandle(thread_token);
+                }
+
+                let _ = RevertToSelf();
+                return is_elevated;
+            }
+        }
+        false
+    }
+
     /// Start the Named Pipe listener in a background worker thread.
     pub fn start(&mut self) -> Result<(), String> {
         #[cfg(windows)]
         {
             use windows::core::HSTRING;
             use windows::Win32::Foundation::INVALID_HANDLE_VALUE;
-            use windows::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
+            use windows::Win32::Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX};
             use windows::Win32::System::Pipes::{
                 ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe,
                 PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
@@ -185,25 +275,44 @@ impl IpcServer {
             let handle = thread::spawn(move || {
                 info!("Starting Windows Named Pipe IPC listener on {}", VAL_OPT_PIPE_NAME);
 
+                let sa_res = Self::build_named_pipe_security_attributes();
+                if let Err(ref e) = sa_res {
+                    warn!("Failed to initialize hardened pipe security attributes: {}", e);
+                }
+
+                let mut is_first = true;
+
                 while running.load(Ordering::SeqCst) {
+                    let open_mode = if is_first {
+                        PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE
+                    } else {
+                        PIPE_ACCESS_DUPLEX
+                    };
+
                     let pipe_handle = unsafe {
                         CreateNamedPipeW(
                             &pipe_name,
-                            PIPE_ACCESS_DUPLEX,
+                            open_mode,
                             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                             PIPE_UNLIMITED_INSTANCES,
                             65536,
                             65536,
                             50,
-                            None,
+                            sa_res.as_ref().ok().map(|(sa, _)| sa as *const _),
                         )
                     };
 
                     if pipe_handle == INVALID_HANDLE_VALUE {
-                        debug!("CreateNamedPipeW returned invalid handle; retrying in 500ms");
+                        if is_first {
+                            warn!("Failed to create first instance of named pipe (potential pipe squatting or already active instance). Retrying in 500ms");
+                        } else {
+                            debug!("CreateNamedPipeW returned invalid handle; retrying in 500ms");
+                        }
                         thread::sleep(Duration::from_millis(500));
                         continue;
                     }
+
+                    is_first = false;
 
                     // Wait for client connection
                     let connected = unsafe { ConnectNamedPipe(pipe_handle, None) };
@@ -213,6 +322,9 @@ impl IpcServer {
                         }
                         break;
                     }
+
+                    // Check client elevation level
+                    let is_elevated = Self::is_client_elevated(pipe_handle);
 
                     // Convert raw handle to std::fs::File for standard BufReader/BufWriter usage
                     let mut file = unsafe { std::fs::File::from_raw_handle(pipe_handle.0 as *mut _) };
@@ -224,7 +336,7 @@ impl IpcServer {
                             let req_res: Result<IpcRequest, _> = decode_message(line.as_bytes());
                             let is_shutdown = matches!(req_res, Ok(IpcRequest::ShutdownDaemon));
                             let resp = match req_res {
-                                Ok(req) => Self::handle_request(req),
+                                Ok(req) => Self::handle_request_authorized(req, is_elevated),
                                 Err(e) => IpcResponse::Error {
                                     code: "INVALID_REQUEST".to_string(),
                                     message: e,
@@ -236,7 +348,7 @@ impl IpcServer {
                                 let _ = file.flush();
                             }
 
-                            if is_shutdown {
+                            if is_shutdown && is_elevated {
                                 running.store(false, Ordering::SeqCst);
                             }
                         }
@@ -244,6 +356,12 @@ impl IpcServer {
 
                     unsafe {
                         let _ = DisconnectNamedPipe(pipe_handle);
+                    }
+                }
+
+                if let Ok((_, p_sd)) = sa_res {
+                    unsafe {
+                        let _ = windows::Win32::Foundation::LocalFree(windows::Win32::Foundation::HLOCAL(p_sd.0));
                     }
                 }
 
@@ -318,6 +436,92 @@ mod tests {
     }
 
     #[test]
+    fn test_unauthorized_client_rejection_for_privileged_requests() {
+        // Privileged requests must be rejected when client is not elevated
+        let reqs = vec![
+            IpcRequest::ApplyOptimizations,
+            IpcRequest::RollbackOptimizations,
+            IpcRequest::PurgeBloatware,
+            IpcRequest::ShutdownDaemon,
+            IpcRequest::LaunchOptimizedGame { auto_relaunch_gui: false },
+        ];
+
+        for req in reqs {
+            let resp = IpcServer::handle_request_authorized(req, false);
+            match resp {
+                IpcResponse::Error { code, .. } => {
+                    assert_eq!(code, "UNAUTHORIZED", "Expected UNAUTHORIZED for non-elevated client");
+                }
+                other => panic!("Expected UNAUTHORIZED Error response, got: {:?}", other),
+            }
+        }
+
+        // Non-privileged requests must succeed even for non-elevated clients
+        let ping_resp = IpcServer::handle_request_authorized(IpcRequest::Ping, false);
+        assert_eq!(ping_resp, IpcResponse::Pong);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_named_pipe_security_attributes() {
+        let sa_res = IpcServer::build_named_pipe_security_attributes();
+        assert!(sa_res.is_ok(), "Failed to create pipe security attributes: {:?}", sa_res.err());
+        let (sa, p_sd) = sa_res.unwrap();
+        assert!(!sa.lpSecurityDescriptor.is_null());
+        unsafe {
+            let _ = windows::Win32::Foundation::LocalFree(windows::Win32::Foundation::HLOCAL(p_sd.0));
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_pipe_squatting_prevention() {
+        use windows::core::HSTRING;
+        use windows::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows::Win32::Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX};
+        use windows::Win32::System::Pipes::{
+            CreateNamedPipeW, PIPE_READMODE_BYTE,
+            PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+        };
+
+        let test_pipe_name = HSTRING::from(r"\\.\pipe\val_opt_test_squatting_pipe");
+
+        // First creation succeeds
+        let h1 = unsafe {
+            CreateNamedPipeW(
+                &test_pipe_name,
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                PIPE_UNLIMITED_INSTANCES,
+                4096,
+                4096,
+                50,
+                None,
+            )
+        };
+        assert_ne!(h1, INVALID_HANDLE_VALUE, "First pipe creation must succeed");
+
+        // Second creation with FILE_FLAG_FIRST_PIPE_INSTANCE MUST FAIL (squatting prevented)
+        let h2 = unsafe {
+            CreateNamedPipeW(
+                &test_pipe_name,
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                PIPE_UNLIMITED_INSTANCES,
+                4096,
+                4096,
+                50,
+                None,
+            )
+        };
+        assert_eq!(h2, INVALID_HANDLE_VALUE, "Duplicate creation with FIRST_PIPE_INSTANCE must be rejected");
+
+        unsafe {
+            let _ = windows::Win32::Foundation::CloseHandle(h1);
+        }
+    }
+
+    #[test]
     #[cfg(windows)]
     fn test_named_pipe_roundtrip_latency() {
         let mut server = IpcServer::new();
@@ -354,3 +558,4 @@ mod tests {
         server.stop();
     }
 }
+

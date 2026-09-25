@@ -96,28 +96,31 @@ impl IpcClient {
                 }
             }
 
-            match pipe_res {
-                Ok(mut pipe) => {
-                    let encoded = encode_message(request)?;
-                    pipe.write_all(&encoded)
-                        .map_err(|e| format!("Failed to send IPC request: {}", e))?;
-                    pipe.flush()
-                        .map_err(|e| format!("Failed to flush pipe buffer: {}", e))?;
+            let send_pipe_res: Result<IpcResponse, String> = (|| {
+                let mut pipe = pipe_res.map_err(|e| format!("Pipe open failed: {}", e))?;
+                let encoded = encode_message(request)?;
+                pipe.write_all(&encoded)
+                    .map_err(|e| format!("Failed to send IPC request: {}", e))?;
+                pipe.flush()
+                    .map_err(|e| format!("Failed to flush pipe buffer: {}", e))?;
 
-                    let mut reader = BufReader::new(pipe);
-                    let mut line = String::new();
-                    reader
-                        .read_line(&mut line)
-                        .map_err(|e| format!("Failed to read IPC response: {}", e))?;
+                let mut reader = BufReader::new(pipe);
+                let mut line = String::new();
+                reader
+                    .read_line(&mut line)
+                    .map_err(|e| format!("Failed to read IPC response: {}", e))?;
 
-                    let elapsed = start.elapsed();
-                    debug!(rtt = ?elapsed, "IPC message round-trip completed");
+                let elapsed = start.elapsed();
+                debug!(rtt = ?elapsed, "IPC message round-trip completed");
 
-                    decode_message(line.as_bytes())
-                }
+                decode_message(line.as_bytes())
+            })();
+
+            match send_pipe_res {
+                Ok(resp) => Ok(resp),
                 Err(e) => {
-                    // Daemon not running or inaccessible: fall back to standalone in-process execution
-                    warn!("Named pipe connection to daemon unavailable ({}). Executing via standalone in-process dispatch.", e);
+                    // Daemon not running, exited, or pipe broken: fall back to standalone in-process execution
+                    warn!("Named pipe communication unavailable or broken ({}). Executing via standalone in-process dispatch.", e);
                     Ok(val_opt_core::ipc_server::IpcServer::handle_request(request.clone()))
                 }
             }
@@ -147,7 +150,7 @@ mod tests {
         // When daemon pipe is not active, client must fall back to standalone dispatch
         // and return a valid response rather than failing or panicking
         let res = IpcClient::send_request(&IpcRequest::Ping);
-        assert!(res.is_ok(), "Standalone fallback should return Ok");
+        assert!(res.is_ok(), "Standalone fallback should return Ok, got: {:?}", res);
         assert_eq!(res.unwrap(), IpcResponse::Pong);
     }
 }

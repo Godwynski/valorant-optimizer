@@ -43,11 +43,23 @@ impl CrashRecoveryService {
         dir.join("recovery.log")
     }
 
-    /// Check if an uncommitted snapshot exists from an ungraceful shutdown and restore it.
+    /// Check if an uncommitted snapshot exists from an ungraceful shutdown and restore it within canonical storage.
     pub fn check_and_recover(snapshot_path: Option<&Path>) -> Result<RecoveryReport, String> {
-        let target = snapshot_path
+        Self::check_and_recover_with_base(snapshot_path, None)
+    }
+
+    /// Check if an uncommitted snapshot exists within an authorized base directory and restore it.
+    pub fn check_and_recover_with_base(
+        snapshot_path: Option<&Path>,
+        allowed_base: Option<&Path>,
+    ) -> Result<RecoveryReport, String> {
+        let raw_target = snapshot_path
             .map(|p| p.to_path_buf())
             .unwrap_or_else(SnapshotEngine::default_snapshot_path);
+
+        // Security check: validate snapshot path against canonical directory and reject reparse points/symlinks/hardlinks (TASK-SEC-05)
+        let target = SnapshotEngine::validate_snapshot_path(&raw_target, allowed_base)
+            .map_err(|e| format!("Security validation failed for rollback path: {}", e))?;
 
         if !target.exists() {
             return Ok(RecoveryReport::default());
@@ -60,8 +72,8 @@ impl CrashRecoveryService {
 
         let start = Instant::now();
 
-        // 1. Load and verify SHA-256 integrity
-        let snapshot = match SnapshotEngine::load_and_verify(Some(&target)) {
+        // 1. Load and verify SHA-256 and HMAC integrity
+        let snapshot = match SnapshotEngine::load_and_verify_with_base(Some(&target), allowed_base) {
             Ok(s) => s,
             Err(SnapshotError::IntegrityViolation {
                 expected_hash,
@@ -94,7 +106,7 @@ impl CrashRecoveryService {
         report.duration_ms = start.elapsed().as_millis();
 
         // 3. Delete uncommitted snapshot
-        let _ = SnapshotEngine::delete_snapshot(Some(&target));
+        let _ = SnapshotEngine::delete_snapshot_with_base(Some(&target), allowed_base);
 
         // 4. Record to recovery log
         let _ = Self::append_recovery_log(&report, None);
@@ -259,12 +271,12 @@ mod tests {
             was_paused_by_optimizer: true,
         });
 
-        SnapshotEngine::save_atomic(&mut snapshot, Some(&snap_file))
+        SnapshotEngine::save_atomic_with_base(&mut snapshot, Some(&snap_file), Some(&temp_dir))
             .expect("Must save test snapshot");
         assert!(snap_file.exists());
 
-        // 2. Execute crash recovery
-        let report = CrashRecoveryService::check_and_recover(Some(&snap_file))
+        // 2. Execute crash recovery within authorized test base
+        let report = CrashRecoveryService::check_and_recover_with_base(Some(&snap_file), Some(&temp_dir))
             .expect("Crash recovery should succeed");
 
         assert!(report.uncommitted_snapshot_found);
@@ -290,10 +302,77 @@ mod tests {
         let _ = fs::create_dir_all(&temp_dir);
         let nonexistent_file = temp_dir.join("does_not_exist.json");
 
-        let report = CrashRecoveryService::check_and_recover(Some(&nonexistent_file))
+        let report = CrashRecoveryService::check_and_recover_with_base(Some(&nonexistent_file), Some(&temp_dir))
             .expect("Should handle non-existent snapshot gracefully");
 
         assert!(!report.uncommitted_snapshot_found);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_crash_recovery_rejects_external_file_outside_canonical_dir() {
+        let temp_dir = std::env::temp_dir().join("val_opt_sec05_ext_recovery");
+        let _ = fs::create_dir_all(&temp_dir);
+        let external_file = temp_dir.join("orphaned_snapshot.json");
+        fs::write(&external_file, b"{\"test\": \"data\"}").unwrap();
+
+        // Attempting recovery on external path with default canonical base
+        let res = CrashRecoveryService::check_and_recover(Some(&external_file));
+        assert!(res.is_err(), "Must reject rollback on external path outside canonical dir");
+        let err = res.unwrap_err();
+        assert!(
+            err.contains("Security validation failed") || err.contains("outside authorized root"),
+            "Unexpected error message: {}",
+            err
+        );
+
+        // Crucial verification: external file MUST NOT be deleted
+        assert!(external_file.exists(), "External file must NOT be deleted by recovery service");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_crash_recovery_rejects_directory_junction() {
+        let temp_dir = std::env::temp_dir().join(format!("val_opt_sec05_rec_junc_{}", std::process::id()));
+        let base_dir = temp_dir.join("allowed_base");
+        let target_dir = temp_dir.join("target_dir");
+        let junction_dir = base_dir.join("junction_link");
+
+        let _ = fs::create_dir_all(&base_dir);
+        let _ = fs::create_dir_all(&target_dir);
+
+        let target_snap = target_dir.join("snapshot.json");
+        fs::write(&target_snap, b"{\"snapshot_id\": \"junc_snap\"}").unwrap();
+
+        // Create junction: junction_dir -> target_dir
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J", junction_dir.to_str().unwrap(), target_dir.to_str().unwrap()])
+            .output()
+            .expect("mklink /J must execute");
+
+        if status.status.success() {
+            let snap_via_junction = junction_dir.join("snapshot.json");
+
+            let res = CrashRecoveryService::check_and_recover_with_base(Some(&snap_via_junction), Some(&base_dir));
+            assert!(res.is_err(), "Crash recovery must reject path through directory junction");
+            let err = res.unwrap_err();
+            assert!(
+                err.contains("Reparse point") || err.contains("junction") || err.contains("symlink"),
+                "Unexpected error message: {}",
+                err
+            );
+
+            // Crucial verification: file in target directory must NOT be deleted!
+            assert!(target_snap.exists(), "Target file pointed to by junction must NOT be deleted");
+
+            // Cleanup junction
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", "rmdir", junction_dir.to_str().unwrap()])
+                .output();
+        }
+
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }

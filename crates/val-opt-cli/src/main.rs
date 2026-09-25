@@ -53,6 +53,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Executing One-Click Emergency System Rollback...");
             let start = std::time::Instant::now();
 
+            if let Some(custom_arg) = args.get(2) {
+                let p = std::path::Path::new(custom_arg);
+                if !val_opt_core::state::SnapshotEngine::is_path_in_canonical_dir(p) {
+                    eprintln!("Error: Rollback path '{}' is outside canonical directory %ProgramData%\\ValorantOptimizer.", p.display());
+                    eprintln!("Security Policy: Rollback operations are restricted strictly to %ProgramData%\\ValorantOptimizer.");
+                    return Err("Security violation: arbitrary rollback path rejected".into());
+                }
+            }
+
             let custom_path = args.get(2).map(|s| std::path::Path::new(s));
             let report = val_opt_core::state::CrashRecoveryService::check_and_recover(custom_path)
                 .map_err(|e| format!("Emergency rollback failed: {}", e))?;
@@ -109,6 +118,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let start = std::time::Instant::now();
             let mut snapshot = val_opt_core::state::SnapshotEngine::capture_system_baseline()
                 .map_err(|e| format!("Failed to capture baseline: {}", e))?;
+
+            if let Some(custom_arg) = args.get(2) {
+                let p = std::path::Path::new(custom_arg);
+                if !val_opt_core::state::SnapshotEngine::is_path_in_canonical_dir(p) {
+                    eprintln!("Error: Snapshot path '{}' is outside canonical directory %ProgramData%\\ValorantOptimizer.", p.display());
+                    eprintln!("Security Policy: Snapshot operations are restricted strictly to %ProgramData%\\ValorantOptimizer.");
+                    return Err("Security violation: arbitrary snapshot path rejected".into());
+                }
+            }
+
             let custom_path = args.get(2).map(|s| std::path::Path::new(s));
             let path = val_opt_core::state::SnapshotEngine::save_atomic(&mut snapshot, custom_path)
                 .map_err(|e| format!("Failed to save snapshot: {}", e))?;

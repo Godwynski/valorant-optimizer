@@ -82,13 +82,16 @@ struct NetAdapterRssRaw {
 
 /// Verify Receive Side Scaling (RSS) configuration on the specified network adapter.
 pub fn verify_rss(adapter_name: &str) -> Result<RssVerificationResult, String> {
-    let script = format!(
-        "Get-NetAdapterRss -Name '{}' -ErrorAction Stop | Select-Object Enabled, NumberOfReceiveQueues | ConvertTo-Json -Compress",
-        adapter_name.replace('\'', "''")
-    );
+    crate::network::adapter::validate_adapter_identifier(adapter_name)?;
 
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+    // Constant script block — input passed strictly via process environment variable
+    const RSS_QUERY_SCRIPT: &str = "Get-NetAdapterRss -Name $env:VAL_OPT_ADAPTER -ErrorAction Stop | Select-Object Enabled, NumberOfReceiveQueues | ConvertTo-Json -Compress";
+
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", RSS_QUERY_SCRIPT]);
+    cmd.env("VAL_OPT_ADAPTER", adapter_name);
+
+    let output = cmd
         .output()
         .map_err(|e| format!("Failed to execute Get-NetAdapterRss: {}", e))?;
 
@@ -151,17 +154,17 @@ pub fn verify_rss(adapter_name: &str) -> Result<RssVerificationResult, String> {
 
 /// Enable RSS on both the adapter and globally via netsh.
 pub fn enable_rss(adapter_name: &str) -> Result<(), String> {
+    crate::network::adapter::validate_adapter_identifier(adapter_name)?;
+
     if !crate::network::adapter::is_elevation_available() {
         return Err("Administrator elevation required to configure RSS settings.".to_string());
     }
 
-    let script = format!(
-        "Enable-NetAdapterRss -Name '{}' -NoRestart -ErrorAction SilentlyContinue",
-        adapter_name.replace('\'', "''")
-    );
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output();
+    const ENABLE_RSS_SCRIPT: &str = "Enable-NetAdapterRss -Name $env:VAL_OPT_ADAPTER -NoRestart -ErrorAction SilentlyContinue";
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", ENABLE_RSS_SCRIPT]);
+    cmd.env("VAL_OPT_ADAPTER", adapter_name);
+    let _ = cmd.output();
 
     let netsh_res = Command::new("netsh")
         .args(["int", "tcp", "set", "global", "rss=enabled"])
@@ -216,5 +219,15 @@ mod tests {
                 assert!(rss_info.rss_enabled || !rss_info.recommendations.is_empty());
             }
         }
+    }
+
+    #[test]
+    fn test_rss_injection_payloads_rejected() {
+        assert!(verify_rss("Ethernet; Start-Process calc.exe").is_err());
+        assert!(verify_rss("Ethernet$(calc)").is_err());
+        assert!(verify_rss("Ethernet' OR '1'='1").is_err());
+
+        assert!(enable_rss("Ethernet; Start-Process calc.exe").is_err());
+        assert!(enable_rss("Ethernet | calc").is_err());
     }
 }

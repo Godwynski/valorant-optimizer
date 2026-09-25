@@ -144,13 +144,13 @@ fn test_edge_case_simulated_hard_crash_recovery() {
         was_paused_by_optimizer: true,
     });
 
-    SnapshotEngine::save_atomic(&mut snapshot, Some(&snap_path))
+    SnapshotEngine::save_atomic_with_base(&mut snapshot, Some(&snap_path), Some(&temp_dir))
         .expect("Snapshot must commit cleanly");
 
     assert!(snap_path.exists());
 
     // Daemon restarts after simulated crash
-    let report = CrashRecoveryService::check_and_recover(Some(&snap_path))
+    let report = CrashRecoveryService::check_and_recover_with_base(Some(&snap_path), Some(&temp_dir))
         .expect("Crash recovery must succeed without throwing unhandled errors");
 
     assert!(report.uncommitted_snapshot_found);

@@ -83,3 +83,16 @@ This document records the foundational architectural decisions, justifications, 
   All pre-optimization states are serialized into an atomic disk snapshot (`%ProgramData%\ValorantOptimizer\snapshot_<timestamp>.json`). On system startup, the native core daemon checks for uncommitted snapshots and automatically executes a rollback before resuming idle state.
 - **Consequences:**
   - Absolute reversibility and crash immunity.
+
+---
+
+## ADR-007: DPAPI Machine-Bound HMAC-SHA256 Snapshot Integrity Model
+- **Date:** 2026-09-25
+- **Status:** `ACCEPTED`
+- **Context:**
+  An unkeyed SHA-256 hash allows standard users or malware to alter serialized snapshot state and recalculate the hash, creating a Local Privilege Escalation (LPE) vector during elevated daemon recovery or CLI rollback.
+- **Decision:**
+  Enforce machine-bound HMAC-SHA256 snapshot integrity (`docs/DPAPI_SNAPSHOT_SECURITY_MODEL.md`). Secrets are generated using CSPRNG and encrypted via Windows DPAPI with `CRYPTPROTECT_LOCAL_MACHINE` and application entropy. The encrypted key is stored at `%ProgramData%\ValorantOptimizer\snapshot.key` with hardened DACL (`SYSTEM` and `Administrators` only). Any integrity, DPAPI, or cross-machine mismatch fails secure without applying changes.
+- **Consequences:**
+  - Guarantees tamper-proof snapshot persistence; eliminates LPE vector; bounds recovery strictly to the local physical computer.
+
