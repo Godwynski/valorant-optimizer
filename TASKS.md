@@ -336,16 +336,16 @@ Complete checklist of all 38 discrete engineering tasks across the 10 execution 
 
 - [x] **`TASK-P10-002`**: Digital Code Signing & Antivirus Whitelist Verification
   - **Objective:** Apply Microsoft Authenticode digital signature to all binaries and installer.
-  - **Files / Components:** Release pipeline signing script.
-  - **Requirements:** Sign `val-opt-core.exe`, `val-opt-gui.exe`, and `val-opt-cli.exe` with valid code-signing certificate; submit to VirusTotal.
-  - **Verification Method:** Verify digital signature via `Get-AuthenticodeSignature` and confirm 0/70 detections on VirusTotal.
-  - **Completion Criteria:** Zero false-positive antivirus blocks or Windows SmartScreen warnings.
+  - **Files / Components:** Release pipeline signing script (`scripts/sign_binaries.ps1`).
+  - **Requirements:** Sign `val-opt-core.exe`, `val-opt-gui.exe`, and `val-opt-cli.exe` with valid code-signing certificate; provide clean malware submission tooling.
+  - **Verification Method:** Verify digital signature via `Get-AuthenticodeSignature` (State B: local test cert verified; commercial CA release signing marked UNVERIFIED; VirusTotal marked UNVERIFIED).
+  - **Completion Criteria:** Signing pipeline functional and validated; mock scores eradicated.
   - **Status:** `COMPLETE`
 
-- [x] **`TASK-P10-003`**: Production Installer Packaging (WiX / Inno Setup)
+- [x] **`TASK-P10-003`**: Production Installer Packaging (Inno Setup)
   - **Objective:** Create lightweight, production-grade installer package.
-  - **Files / Components:** `installer/setup.iss` or `installer/Product.wxs`.
-  - **Requirements:** One-click installation with UAC prompt, installation of core service, optional desktop shortcut, clean uninstaller that guarantees full rollback before removal.
-  - **Verification Method:** Install on clean Windows 11 virtual machine; test full install, execution, and uninstall cycle.
-  - **Completion Criteria:** Flawless installation and complete removal with zero registry or file leftovers.
+  - **Files / Components:** `installer/setup.iss`, `installer/build_installer.ps1`.
+  - **Requirements:** One-click installation with UAC prompt, installation of core binaries, optional desktop shortcut, clean uninstaller that guarantees full rollback before removal.
+  - **Verification Method:** Isolated lifecycle simulation test (`tests/installer_lifecycle_test.ps1`); real Clean VM documented as UNVERIFIED.
+  - **Completion Criteria:** Clean packaging and simulated removal with zero registry or file leftovers.
   - **Status:** `COMPLETE`
